@@ -1,0 +1,974 @@
+import { execFile } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import {
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  rmdir,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join, resolve, sep } from 'node:path'
+import { promisify } from 'node:util'
+import type { GitConfig, WorktreeCleanup } from '@a2wave/shared'
+import { logger } from './logger.js'
+
+const execFileAsyncRaw = promisify(execFile)
+
+const GIT_TIMEOUT_MS = 60_000
+
+/**
+ * 统一的 git exec 环境变量：
+ * - `LC_ALL=C`：强制 git 输出英文，保证我们在 stderr 上 regex 匹配（例如
+ *   `rethrowIfBranchLocked` 里对 "already checked out at '...'" 的解析）能稳定命中。
+ *   宿主机 locale 为 zh_CN.UTF-8 时 git 会输出 "已经检出到 '...'"，regex 失配导致
+ *   WorktreeBranchLockedError 不会抛，外层降级成 500 而不是 409。
+ * - `GIT_TERMINAL_PROMPT=0`：禁用 git 交互式密码提示，避免挂住。
+ */
+const GIT_ENV = { ...process.env, LC_ALL: 'C', GIT_TERMINAL_PROMPT: '0' }
+
+/**
+ * execFile 的 git 专用 wrapper：自动注入 GIT_ENV。
+ * 任何 env 覆盖都走 `opts.env`（本文件暂无此用法），默认走 GIT_ENV。
+ */
+type ExecOpts = Parameters<typeof execFileAsyncRaw>[2]
+const execFileAsync: typeof execFileAsyncRaw = ((
+  file: string,
+  args?: readonly string[],
+  options?: ExecOpts,
+) => execFileAsyncRaw(file, args, { env: GIT_ENV, ...(options ?? {}) })) as typeof execFileAsyncRaw
+
+export const WORKTREE_NAME_REGEX = /^[a-zA-Z0-9_-]{1,64}$/
+
+// ============================================================
+// Workspace state file (~/.a2wave-workspace.json inside each workspace)
+// - 内容：cleanup mode + 可选 lastRunId
+// - mtime：lastActivityAt（写入时自动更新）
+// - last-run-wins：每次 run 覆盖写
+// ============================================================
+
+export const WORKSPACE_STATE_FILE = '.a2wave-workspace.json'
+const WORKSPACE_STATE_TEMP_FILE_PATTERN = /^\.a2wave-workspace\.json\.[0-9a-f]{8}\.tmp$/
+const WORKSPACE_ARTIFACTS_DIRECTORY = 'artifacts'
+
+export interface WorkspaceState {
+  cleanup: WorktreeCleanup
+  lastRunId?: string | null
+}
+
+/**
+ * 原子写状态文件：写 .tmp 再 rename，rename 在 POSIX 上原子。
+ * 并发场景下最后一个 rename 胜出——天然匹配 last-run-wins 语义。
+ */
+export async function writeWorkspaceState(wsPath: string, state: WorkspaceState): Promise<void> {
+  const target = join(wsPath, WORKSPACE_STATE_FILE)
+  const tmp = `${target}.${randomBytes(4).toString('hex')}.tmp`
+  await writeFile(tmp, JSON.stringify(state), 'utf8')
+  await rename(tmp, target)
+}
+
+export interface ReadWorkspaceStateResult {
+  state: WorkspaceState | null
+  lastActivityAt: number | null // ms timestamp, state 文件 mtime
+}
+
+export async function readWorkspaceState(wsPath: string): Promise<ReadWorkspaceStateResult> {
+  const target = join(wsPath, WORKSPACE_STATE_FILE)
+  try {
+    const [raw, st] = await Promise.all([readFile(target, 'utf8'), stat(target)])
+    const parsed = JSON.parse(raw) as WorkspaceState
+    return { state: parsed, lastActivityAt: st.mtimeMs }
+  } catch {
+    return { state: null, lastActivityAt: null }
+  }
+}
+
+export class WorktreeBranchLockedError extends Error {
+  constructor(
+    public readonly branch: string,
+    public readonly lockedBy: string,
+  ) {
+    super(`Branch '${branch}' is already checked out in worktree '${lockedBy}'`)
+    this.name = 'WorktreeBranchLockedError'
+  }
+}
+
+export class WorktreeDirtyError extends Error {
+  constructor(
+    public readonly wsPath: string,
+    public readonly directory?: string,
+  ) {
+    super(
+      directory
+        ? `Workspace '${wsPath}' sub-repo '${directory}' has uncommitted changes; cannot switch branch`
+        : `Workspace '${wsPath}' has uncommitted changes; cannot switch branch`,
+    )
+    this.name = 'WorktreeDirtyError'
+  }
+}
+
+// ============================================================
+// Default workspaces path
+// ============================================================
+
+/**
+ * 默认 workspacesPath：~/.a2wave/workspaces/<sourceIdSuffix>
+ *
+ * 取 sourceId 第一个 '_' 之后的完整随机段（`scm_` 前缀去掉）。
+ * 用 slice 而不是 split('_').pop()，因为 createId 的 base64url 字母表含 '_'，
+ * pop 会丢失前缀之外的前几段熵、造成跨 source 的 wsRoot 冲突。
+ */
+export function defaultWorkspacesPath(sourceId: string): string {
+  const underscoreIdx = sourceId.indexOf('_')
+  const suffix = underscoreIdx >= 0 ? sourceId.slice(underscoreIdx + 1) : sourceId
+  return join(homedir(), '.a2wave', 'workspaces', suffix || sourceId)
+}
+
+// ============================================================
+// Create workspace
+// ============================================================
+
+/**
+ * 创建 git workspace（支持单仓库和多仓库）。
+ *
+ * 单仓库：git worktree add <wsRoot>/<name> [--detach | <branch> | -b <branch>]
+ * 多仓库：对每个子 repo 分别创建 worktree，保持目录结构。
+ *
+ * 如果目录已存在则跳过（幂等）。
+ *
+ * @returns `{ path, created }` — created=false 表示复用已有 worktree
+ */
+export async function createGitWorkspace(
+  localPath: string,
+  wsRoot: string,
+  name: string,
+  config: GitConfig,
+  options?: { branch?: string },
+): Promise<{ path: string; created: boolean }> {
+  const wsPath = join(wsRoot, name)
+
+  if (existsSync(wsPath)) {
+    // 多仓库模式下校验所有 sub-repo 子目录都存在；任一缺失则视为残缺，
+    // 强制清理后走 fresh create（防止上次 create 回滚失败留下的半成品被复用）。
+    const reuseRepos = config.repos?.length ? config.repos : null
+    const incompleteRepos = reuseRepos
+      ? reuseRepos.filter((r) => !existsSync(join(wsPath, r.directory))).map((r) => r.directory)
+      : []
+
+    if (incompleteRepos.length > 0) {
+      logger.warn(
+        { wsPath, incompleteRepos },
+        'Workspace is incomplete (missing sub-repo dirs), rebuilding',
+      )
+      await removeGitWorkspace(localPath, wsRoot, name, config)
+      // fall through to fresh create below
+    } else {
+      logger.info({ wsPath }, 'Workspace already exists, reusing')
+      await switchBranchOnReuse(wsPath, localPath, config, options?.branch)
+      return { path: wsPath, created: false }
+    }
+  }
+
+  await mkdir(wsRoot, { recursive: true })
+
+  const multiRepos = config.repos?.length ? config.repos : null
+
+  if (multiRepos) {
+    await mkdir(wsPath, { recursive: true })
+    const errors: string[] = []
+    let lockedError: WorktreeBranchLockedError | undefined
+
+    for (const repo of multiRepos) {
+      const repoLocalPath = join(localPath, repo.directory)
+      const repoWsPath = join(wsPath, repo.directory)
+
+      try {
+        const args = await buildWorktreeAddArgs(
+          repoWsPath,
+          repoLocalPath,
+          options?.branch,
+          repo.branch || 'main',
+        )
+        await execFileAsync('git', args, { cwd: repoLocalPath, timeout: GIT_TIMEOUT_MS })
+        logger.info({ repoWsPath, directory: repo.directory }, 'Created workspace for sub-repo')
+      } catch (err) {
+        try {
+          rethrowIfBranchLocked(err, options?.branch)
+        } catch (lockErr) {
+          if (lockErr instanceof WorktreeBranchLockedError) {
+            lockedError = lockErr
+            break
+          }
+          throw lockErr
+        }
+        const msg = err instanceof Error ? err.message : String(err)
+        errors.push(`${repo.directory}: ${msg}`)
+        logger.error({ err, directory: repo.directory }, 'Failed to create workspace for sub-repo')
+      }
+    }
+
+    if (lockedError || errors.length > 0) {
+      // 回滚已创建的 worktree
+      try {
+        await removeGitWorkspace(localPath, wsRoot, name, config)
+      } catch (rollbackErr) {
+        // If the first `git worktree add` failed, there is no Git registration
+        // to prove. The parent directory was created by this invocation and is
+        // still empty, so remove that exact directory with `rmdir`. Unlike a
+        // recursive fallback, this fails closed if anything was placed inside.
+        try {
+          await rmdir(wsPath)
+        } catch (emptyDirRemovalErr) {
+          logger.error(
+            { err: rollbackErr, emptyDirRemovalErr, wsPath },
+            'Rollback after failed multi-repo create also failed — workspace may be left in incomplete state',
+          )
+        }
+      }
+      if (lockedError) throw lockedError
+      throw new Error(`Failed to create workspace for repos: ${errors.join('; ')}`)
+    }
+  } else {
+    try {
+      const args = await buildWorktreeAddArgs(
+        wsPath,
+        localPath,
+        options?.branch,
+        config.branch || 'main',
+      )
+      await execFileAsync('git', args, { cwd: localPath, timeout: GIT_TIMEOUT_MS })
+      logger.info({ wsPath }, 'Created workspace')
+    } catch (err) {
+      rethrowIfBranchLocked(err, options?.branch)
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new Error(`Failed to create workspace: ${msg}`)
+    }
+  }
+
+  return { path: wsPath, created: true }
+}
+
+type BranchResolution = 'local' | 'remote' | 'new'
+
+/**
+ * 判断 `<branch>` 在 checkout 时应当走哪条路径：
+ *   - 'local'  → 本地已有同名分支，直接 `checkout <branch>`
+ *   - 'remote' → 仅在 origin 可见（本地或按需 fetch 到了 refs/remotes/origin/<branch>），
+ *                需要显式 `origin/<branch>` 建立本地追踪分支
+ *   - 'new'    → origin 上也不存在，属于新建分支场景
+ *
+ * 关键：git-sync.ts 首次克隆用了 `--single-branch`，`.git/config` 的 fetch refspec
+ * 被锁成 `+refs/heads/<X>:refs/remotes/origin/<X>`，裸 `git fetch origin` 不会同步
+ * 别的分支的 ref。这里在找不到 `refs/remotes/origin/<B>` 时显式 `fetch origin
+ * <B>:refs/remotes/origin/<B>`，把该 ref 拉下来再返回 'remote'。否则旧实现会静默
+ * 走 `-b` 从当前 HEAD 凭空开一条空分支，内容不是远端 branch 的真实提交。
+ */
+/**
+ * 解析"新分支"场景下的 base ref —— 新分支永远应从**配置的 baseBranch** 分叉，
+ * 而不是 local repo 当前的 HEAD（HEAD 可能是上一次 run 留下的任意分支）。
+ *
+ * 优先 `origin/<baseBranch>`（按需触发显式 refspec fetch，兼容 --single-branch 克隆）；
+ * 若 remote 真的拿不到（离线 / 本地 init 的裸仓），退回本地 `<baseBranch>` ref。
+ * 两者都没有 → 抛错，不允许悄悄从 HEAD 兜底。
+ */
+async function resolveBaseRef(localRepoPath: string, baseBranch: string): Promise<string> {
+  const res = await resolveBranchForCheckout(localRepoPath, baseBranch)
+  if (res === 'remote') return `origin/${baseBranch}`
+  if (res === 'local') return baseBranch
+  throw new Error(
+    `Configured base branch '${baseBranch}' not found locally or on origin — refusing to create new branch from arbitrary HEAD`,
+  )
+}
+
+async function resolveBranchForCheckout(
+  localRepoPath: string,
+  branch: string,
+): Promise<BranchResolution> {
+  try {
+    await execFileAsync('git', ['rev-parse', '--verify', branch], {
+      cwd: localRepoPath,
+      timeout: 5_000,
+    })
+    return 'local'
+  } catch {
+    /* not local */
+  }
+
+  try {
+    await execFileAsync('git', ['rev-parse', '--verify', `refs/remotes/origin/${branch}`], {
+      cwd: localRepoPath,
+      timeout: 5_000,
+    })
+    return 'remote'
+  } catch {
+    /* may be single-branch lockout — try explicit refspec fetch */
+  }
+
+  // 用 `ls-remote --exit-code` 明确区分「远端没有该分支」(exit 2) 与「网络/鉴权失败」(其他非零)。
+  // 依赖 stderr 文案是不可靠的（locale / git 版本会变），exit code 是 git 的稳定契约。
+  try {
+    await execFileAsync('git', ['ls-remote', '--exit-code', 'origin', `refs/heads/${branch}`], {
+      cwd: localRepoPath,
+      timeout: GIT_TIMEOUT_MS,
+    })
+  } catch (err) {
+    const code = (err as { code?: number | string } | null)?.code
+    if (code === 2) {
+      logger.debug({ localRepoPath, branch }, 'Remote branch not found — treating as new branch')
+      return 'new'
+    }
+    // 网络 / 鉴权 / 超时等——不要静默降级为 new，否则会在 base 上新建同名分支覆盖远端历史
+    logger.warn(
+      { err, localRepoPath, branch },
+      'ls-remote failed for non-missing-ref reason — failing run',
+    )
+    throw err
+  }
+
+  // 远端确实有该分支，fetch 到本地
+  await execFileAsync(
+    'git',
+    ['fetch', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+    { cwd: localRepoPath, timeout: GIT_TIMEOUT_MS },
+  )
+  logger.info(
+    { localRepoPath, branch },
+    'Fetched missing remote branch ref (single-branch clone recovery)',
+  )
+  return 'remote'
+}
+
+/**
+ * 扫描 `git worktree list --porcelain`，找出哪个 worktree（不是 `selfPath`）正持有
+ * 目标 branch。没有的话返回 null。
+ *
+ * porcelain 输出每条 worktree 块如：
+ *   worktree /path/to/wt
+ *   HEAD <sha>
+ *   branch refs/heads/<name>   （detached 时是 `detached`）
+ */
+async function findBranchLockHolder(
+  cwd: string,
+  branch: string,
+  selfPath: string,
+): Promise<string | null> {
+  const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], {
+    cwd,
+    timeout: 5_000,
+  })
+  const blocks = stdout.split(/\n\n+/)
+  for (const block of blocks) {
+    let wtPath: string | null = null
+    let wtBranch: string | null = null
+    for (const line of block.split('\n')) {
+      if (line.startsWith('worktree ')) wtPath = line.slice('worktree '.length).trim()
+      else if (line.startsWith('branch ')) {
+        const ref = line.slice('branch '.length).trim()
+        wtBranch = ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref
+      }
+    }
+    if (wtBranch === branch && wtPath && wtPath !== selfPath) {
+      return wtPath
+    }
+  }
+  return null
+}
+
+/**
+ * 复用 workspace 时根据 options.branch 切换分支：
+ * - 无 branch：保持不动（允许 detached 或任意分支）
+ * - branch 等于当前分支：no-op
+ * - branch 不同：
+ *    - 任一 sub-repo 脏 → WorktreeDirtyError
+ *    - 目标 branch 被其他 worktree 独占 → WorktreeBranchLockedError
+ *    - 否则执行 git checkout <branch>
+ *
+ * 多 repo 先 pre-validate（收集脏/锁状态）再统一切换，以保证原子性：
+ * 任何 sub-repo 不满足条件时不触碰任何 sub-repo。
+ */
+async function switchBranchOnReuse(
+  wsPath: string,
+  localPath: string,
+  config: GitConfig,
+  branch?: string,
+): Promise<void> {
+  if (!branch) {
+    return
+  }
+
+  const repoDirs = config.repos?.length ? config.repos.map((r) => r.directory) : ['']
+
+  // Pre-validate：所有 sub-repo 的 dirty 状态 + 目标 branch 被其它 worktree 独占的情况，
+  // 都要在一次遍历里发现。如果在 checkout 阶段才发现被 locked，已经切走的 repo 会被留
+  // 在一个不一致的状态里（半切成功）——必须原子拒绝。
+  for (const dir of repoDirs) {
+    const wsRepoPath = join(wsPath, dir)
+    const localRepoPath = dir ? join(localPath, dir) : localPath
+
+    const { stdout: current } = await execFileAsync(
+      'git',
+      ['symbolic-ref', '--short', '-q', 'HEAD'],
+      { cwd: wsRepoPath, timeout: 5_000 },
+    ).catch(() => ({ stdout: '' }))
+    if (current.trim() === branch) {
+      continue
+    }
+
+    const { stdout: dirty } = await execFileAsync('git', ['status', '--porcelain'], {
+      cwd: wsRepoPath,
+      timeout: 5_000,
+    })
+    if (dirty.trim()) {
+      throw new WorktreeDirtyError(wsPath, dir || undefined)
+    }
+
+    // 检查目标 branch 是否被任何别的 worktree 独占
+    const lockedBy = await findBranchLockHolder(localRepoPath, branch, wsRepoPath)
+    if (lockedBy) {
+      throw new WorktreeBranchLockedError(branch, lockedBy)
+    }
+  }
+
+  // Execute checkouts with rollback on failure.
+  // pre-validate 只覆盖 dirty/lock 两类已知错误；checkout 阶段仍可能因权限、磁盘、
+  // 未追踪文件冲突等原因失败。任何一个 sub-repo 失败 → 已切走的逐个回切到原 ref，
+  // 保持多仓原子语义（不允许半切）。
+  const switched: Array<{ wsRepoPath: string; original: string }> = []
+  for (const dir of repoDirs) {
+    const wsRepoPath = join(wsPath, dir)
+    const localRepoPath = dir ? join(localPath, dir) : localPath
+
+    // 记录原 ref：优先 branch 名，detached 时退回 commit SHA
+    let original = ''
+    const { stdout: currentBranch } = await execFileAsync(
+      'git',
+      ['symbolic-ref', '--short', '-q', 'HEAD'],
+      { cwd: wsRepoPath, timeout: 5_000 },
+    ).catch(() => ({ stdout: '' }))
+    original = currentBranch.trim()
+    if (!original) {
+      const { stdout: sha } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+        cwd: wsRepoPath,
+        timeout: 5_000,
+      }).catch(() => ({ stdout: '' }))
+      original = sha.trim()
+    }
+    if (original === branch) {
+      continue
+    }
+
+    // local / remote / new 三分支：remote 场景必须显式 `origin/<branch>`，否则 DWIM
+    // 失败；new 场景以配置的 baseBranch 为分叉点（不是 HEAD）。
+    const resolution = await resolveBranchForCheckout(localRepoPath, branch)
+    let checkoutArgs: string[]
+    if (resolution === 'local') {
+      checkoutArgs = ['checkout', branch]
+    } else if (resolution === 'remote') {
+      checkoutArgs = ['checkout', '-B', branch, `origin/${branch}`]
+    } else {
+      const baseBranch = dir
+        ? (config.repos?.find((r) => r.directory === dir)?.branch ?? 'main')
+        : config.branch || 'main'
+      const baseRef = await resolveBaseRef(localRepoPath, baseBranch)
+      checkoutArgs = ['checkout', '-b', branch, baseRef]
+    }
+    try {
+      await execFileAsync('git', checkoutArgs, { cwd: wsRepoPath, timeout: GIT_TIMEOUT_MS })
+      logger.info({ wsPath, dir, branch }, 'Switched branch on reused workspace')
+      if (original) switched.push({ wsRepoPath, original })
+    } catch (err) {
+      for (const entry of [...switched].reverse()) {
+        try {
+          await execFileAsync('git', ['checkout', entry.original], {
+            cwd: entry.wsRepoPath,
+            timeout: GIT_TIMEOUT_MS,
+          })
+          logger.warn(
+            { wsPath, ...entry },
+            'Rolled back partial branch switch after later-repo failure',
+          )
+        } catch (rbErr) {
+          logger.error(
+            { err: rbErr, wsPath, ...entry },
+            'Failed to roll back partial branch switch — workspace may be in inconsistent state',
+          )
+        }
+      }
+      rethrowIfBranchLocked(err, branch)
+      throw err
+    }
+  }
+}
+
+/**
+ * 构建 git worktree add 参数：
+ * - 无 branch → --detach
+ * - branch 已存在（本地或远程）→ 直接 checkout（尊重本地现状，不主动 fetch）
+ * - branch 不存在 → -b 新建，**以配置的 baseBranch 为分叉点**（而非当前 HEAD）
+ */
+async function buildWorktreeAddArgs(
+  wsPath: string,
+  cwd: string,
+  branch: string | undefined,
+  baseBranch: string,
+): Promise<string[]> {
+  if (!branch) {
+    return ['worktree', 'add', wsPath, '--detach']
+  }
+
+  const resolution = await resolveBranchForCheckout(cwd, branch)
+  if (resolution === 'local') {
+    return ['worktree', 'add', wsPath, branch]
+  }
+  // remote 场景必须显式 `origin/<branch>` —— `worktree add <path> <bare-name>` 在
+  // 只有 remote-tracking ref 的情况下不会 DWIM，会报 "invalid reference"。
+  if (resolution === 'remote') {
+    return ['worktree', 'add', '-b', branch, wsPath, `origin/${branch}`]
+  }
+  // new：必须显式指定 base，否则会从当前 HEAD（可能是任意分支）分叉。
+  const baseRef = await resolveBaseRef(cwd, baseBranch)
+  return ['worktree', 'add', '-b', branch, wsPath, baseRef]
+}
+
+/**
+ * 检测 git 错误是否为 branch 锁定（同一 branch 不能被两个 worktree checkout），
+ * 如果是则抛出 WorktreeBranchLockedError。
+ */
+function rethrowIfBranchLocked(err: unknown, branch?: string): void {
+  if (!branch) return
+  const stderr = (err as { stderr?: string })?.stderr ?? (err instanceof Error ? err.message : '')
+  // git 报错格式（版本差异）:
+  //   "fatal: 'branch' is already checked out at '/path/to/worktree'"
+  //   "fatal: 'branch' is already used by worktree at '/path/to/worktree'"
+  const match = stderr.match(/already (?:checked out|used by worktree) at '([^']+)'/)
+  if (match) {
+    throw new WorktreeBranchLockedError(branch, match[1])
+  }
+}
+
+// ============================================================
+// Remove workspace
+// ============================================================
+
+/**
+ * 读出 worktree 的 HEAD branch 名；detached 或读不到时返回 null。
+ * 必须在 `git worktree remove` **之前**调用（remove 之后 wsPath 已不存在）。
+ */
+async function readWorktreeBranch(wsRepoPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('git', ['symbolic-ref', '--short', '-q', 'HEAD'], {
+      cwd: wsRepoPath,
+      timeout: 5_000,
+    })
+    const name = stdout.trim()
+    return name || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 删除主 repo 中的 local branch；失败只 warn（branch 可能被其他 worktree 独占，
+ * 或是主 clone 的当前 HEAD，git 会拒绝 —— 这是天然的安全网）。
+ */
+async function deleteLocalBranch(repoLocalPath: string, branch: string): Promise<void> {
+  try {
+    await execFileAsync('git', ['branch', '-D', branch], {
+      cwd: repoLocalPath,
+      timeout: GIT_TIMEOUT_MS,
+    })
+    logger.info({ repoLocalPath, branch }, 'Deleted local branch along with worktree')
+  } catch (err) {
+    logger.warn(
+      { err, repoLocalPath, branch },
+      'Failed to delete local branch (likely held by another worktree or is main HEAD) — left in place',
+    )
+  }
+}
+
+interface RegisteredWorktree {
+  repoLocalPath: string
+  workspacePath: string
+}
+
+function isContainedPath(parent: string, child: string): boolean {
+  const normalizedParent = resolve(parent)
+  const normalizedChild = resolve(child)
+  return normalizedChild.startsWith(`${normalizedParent}${sep}`)
+}
+
+async function assertRegisteredWorktree(
+  repoLocalPath: string,
+  wsRoot: string,
+  workspacePath: string,
+): Promise<RegisteredWorktree> {
+  const workspaceRealPath = await assertWorkspaceWithinRoot(wsRoot, workspacePath)
+
+  const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], {
+    cwd: repoLocalPath,
+    timeout: GIT_TIMEOUT_MS,
+  })
+  const registeredPaths = stdout
+    .split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => line.slice('worktree '.length).trim())
+
+  for (const registeredPath of registeredPaths) {
+    try {
+      if ((await realpath(registeredPath)) === workspaceRealPath) {
+        return { repoLocalPath, workspacePath: workspaceRealPath }
+      }
+    } catch {
+      // A stale Git registration is not proof that the requested live path is
+      // managed. `git worktree prune` may clean it separately.
+    }
+  }
+  throw new Error(`Workspace '${workspacePath}' is not a registered Git worktree`)
+}
+
+async function assertWorkspaceWithinRoot(wsRoot: string, workspacePath: string): Promise<string> {
+  const [rootRealPath, workspaceRealPath] = await Promise.all([
+    realpath(wsRoot),
+    realpath(workspacePath),
+  ])
+  if (!isContainedPath(rootRealPath, workspaceRealPath)) {
+    throw new Error(`Workspace '${workspacePath}' resolves outside the configured workspaces root`)
+  }
+  return workspaceRealPath
+}
+
+/**
+ * 删除 workspace（支持单仓库和多仓库）。
+ *
+ * 语义：workspace 是云端 Agent 的一次性环境 —— 删除时**一并删除**对应的 local branch，
+ * 和 Codex / Claude Cloud 对齐。未 push 的提交会随 workspace 一起丢失，push 是保留工作
+ * 的唯一途径。这样可以避免：
+ *   1. 残留 branch 在主 repo 里越堆越多
+ *   2. 下次同名 branch 创建 worktree 时误复用陈旧的 local ref（而不是从配置的
+ *      baseBranch 分叉）
+ */
+export async function removeGitWorkspace(
+  localPath: string,
+  wsRoot: string,
+  name: string,
+  config: GitConfig,
+): Promise<void> {
+  if (!WORKTREE_NAME_REGEX.test(name)) {
+    throw new Error(`Invalid workspace name: ${name}`)
+  }
+  const wsPath = join(wsRoot, name)
+
+  if (!existsSync(wsPath)) {
+    logger.info({ wsPath }, 'Workspace does not exist, nothing to remove')
+    return
+  }
+
+  const multiRepos = config.repos?.length ? config.repos : null
+
+  // Preflight every live repository before removing any of them. This gives
+  // deletion two independent boundaries: the configured root (realpath
+  // containment) and Git's own worktree registry. Never turn a failed Git
+  // removal into an arbitrary recursive filesystem delete. An interrupted
+  // multi-repo create may have only the parent directory and no Git entry yet;
+  // that case is recoverable through containment + the exact entry allowlist +
+  // a final non-recursive rmdir.
+  if (multiRepos) {
+    await assertWorkspaceWithinRoot(wsRoot, wsPath)
+    const allowedEntries = new Set([
+      WORKSPACE_STATE_FILE,
+      WORKSPACE_ARTIFACTS_DIRECTORY,
+      ...multiRepos.map((repo) => repo.directory),
+    ])
+    const unexpectedEntries = (await readdir(wsPath)).filter(
+      (entry) => !allowedEntries.has(entry) && !WORKSPACE_STATE_TEMP_FILE_PATTERN.test(entry),
+    )
+    if (unexpectedEntries.length > 0) {
+      throw new Error(
+        `Workspace '${wsPath}' contains unexpected entries and cannot be safely removed: ${unexpectedEntries.join(', ')}`,
+      )
+    }
+    for (const repo of multiRepos) {
+      const repoWsPath = join(wsPath, repo.directory)
+      if (!existsSync(repoWsPath)) continue
+      await assertRegisteredWorktree(join(localPath, repo.directory), wsRoot, repoWsPath)
+    }
+  } else {
+    await assertRegisteredWorktree(localPath, wsRoot, wsPath)
+  }
+
+  if (multiRepos) {
+    for (const repo of multiRepos) {
+      const repoLocalPath = join(localPath, repo.directory)
+      const repoWsPath = join(wsPath, repo.directory)
+
+      if (!existsSync(repoWsPath)) continue
+
+      // 必须在 remove 前读出 branch
+      const branch = await readWorktreeBranch(repoWsPath)
+
+      try {
+        await execFileAsync('git', ['worktree', 'remove', repoWsPath, '--force'], {
+          cwd: repoLocalPath,
+          timeout: GIT_TIMEOUT_MS,
+        })
+      } catch (err) {
+        throw new Error(`Failed to remove registered Git worktree '${repoWsPath}'`, {
+          cause: err,
+        })
+      }
+
+      if (branch) {
+        await deleteLocalBranch(repoLocalPath, branch)
+      }
+    }
+  } else {
+    const branch = await readWorktreeBranch(wsPath)
+
+    try {
+      await execFileAsync('git', ['worktree', 'remove', wsPath, '--force'], {
+        cwd: localPath,
+        timeout: GIT_TIMEOUT_MS,
+      })
+    } catch (err) {
+      throw new Error(`Failed to remove registered Git worktree '${wsPath}'`, { cause: err })
+    }
+
+    if (branch) {
+      await deleteLocalBranch(localPath, branch)
+    }
+  }
+
+  // Multi-repo worktrees leave only platform-owned runtime entries and their
+  // parent directory behind. Artifacts are explicitly disposable output under
+  // A2WAVE_ARTIFACTS_DIR; state temp files can survive a crash between write
+  // and rename. Remove only these allowlisted entries, then require rmdir to
+  // prove nothing else appeared during cleanup.
+  if (existsSync(wsPath)) {
+    await rm(join(wsPath, WORKSPACE_ARTIFACTS_DIRECTORY), { recursive: true, force: true })
+    await rm(join(wsPath, WORKSPACE_STATE_FILE), { force: true })
+    for (const entry of await readdir(wsPath)) {
+      if (WORKSPACE_STATE_TEMP_FILE_PATTERN.test(entry)) {
+        await rm(join(wsPath, entry), { recursive: true, force: true })
+      }
+    }
+    await rmdir(wsPath)
+  }
+}
+
+// ============================================================
+// List workspaces
+// ============================================================
+
+export interface WorkspaceRepoInfo {
+  /** 子 repo 目录名；单仓库模式为空字符串（代表 workspace 根） */
+  directory: string
+  branch: string | null // null = detached HEAD
+  commit: string | null // null = 读不到 HEAD（error 必非空）
+  error?: string
+}
+
+export interface WorkspaceInfo {
+  name: string
+  path: string
+  repos: WorkspaceRepoInfo[]
+  /** 状态文件内容；null = 无状态文件（老的/外部创建的 workspace） */
+  cleanup: WorktreeCleanup | null
+  lastRunId: string | null
+  /** 状态文件 mtime（ms），null = 无状态文件 */
+  lastActivityAt: number | null
+}
+
+/**
+ * 读取单个 git 目录的 branch / commit，失败返回 error。
+ */
+async function readRepoInfo(gitDir: string, directory: string): Promise<WorkspaceRepoInfo> {
+  if (!existsSync(gitDir)) {
+    return { directory, branch: null, commit: null, error: 'Directory missing' }
+  }
+  try {
+    const { stdout: commitRaw } = await execFileAsync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: gitDir,
+      timeout: 5_000,
+    })
+    let branch: string | null = null
+    try {
+      const { stdout: branchRaw } = await execFileAsync(
+        'git',
+        ['symbolic-ref', '--short', 'HEAD'],
+        { cwd: gitDir, timeout: 5_000 },
+      )
+      branch = branchRaw.trim()
+    } catch {
+      // detached HEAD — branch stays null
+    }
+    return { directory, branch, commit: commitRaw.trim() }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { directory, branch: null, commit: null, error: msg }
+  }
+}
+
+/**
+ * 列出 wsRoot 下所有 workspace 及其 git 信息。
+ *
+ * 单仓库：每个 workspace 产生 repos=[单项]，directory=''。
+ * 多仓库：每个 workspace 产生 repos=[每个子 repo 一项]，子 repo 缺失或读失败会带 error。
+ */
+export async function listGitWorkspaces(
+  localPath: string,
+  wsRoot: string,
+  config: GitConfig,
+): Promise<WorkspaceInfo[]> {
+  if (!existsSync(wsRoot)) return []
+
+  const entries = await readdir(wsRoot, { withFileTypes: true })
+  const dirs = entries.filter((e) => e.isDirectory())
+
+  const results: WorkspaceInfo[] = []
+  const multiRepos = config.repos?.length ? config.repos : null
+
+  for (const dir of dirs) {
+    const wsPath = join(wsRoot, dir.name)
+    const repos: WorkspaceRepoInfo[] = []
+
+    if (multiRepos) {
+      for (const repo of multiRepos) {
+        repos.push(await readRepoInfo(join(wsPath, repo.directory), repo.directory))
+      }
+    } else {
+      repos.push(await readRepoInfo(wsPath, ''))
+    }
+
+    const { state, lastActivityAt } = await readWorkspaceState(wsPath)
+    results.push({
+      name: dir.name,
+      path: wsPath,
+      repos,
+      cleanup: state?.cleanup ?? null,
+      lastRunId: state?.lastRunId ?? null,
+      lastActivityAt,
+    })
+  }
+
+  // 按最近活动时间倒序（无状态文件排最后）
+  results.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))
+
+  return results
+}
+
+// ============================================================
+// TTL 清理：idle > 7d 或 LRU > 20
+// ============================================================
+
+export const TTL_IDLE_DAYS = 7
+export const TTL_LRU_CAP = 20
+
+export interface CleanupOptions {
+  /** 这些 workspace 路径视为"被占用"，不清理（由 caller 从 runs 表计算） */
+  activePaths: Set<string>
+  idleDays?: number
+  lruCap?: number
+  now?: number // 注入 now 便于测试
+}
+
+/**
+ * 清理 `ttl` workspace：idle 超阈值 OR 总数超容量（LRU 淘汰最旧）。
+ * 跳过：persistent / 无状态文件 / 活跃占用 / dirty（有未提交改动）。
+ */
+export async function cleanupStaleWorkspaces(
+  localPath: string,
+  wsRoot: string,
+  config: GitConfig,
+  opts: CleanupOptions,
+): Promise<string[]> {
+  const idleDays = opts.idleDays ?? TTL_IDLE_DAYS
+  const lruCap = opts.lruCap ?? TTL_LRU_CAP
+  const now = opts.now ?? Date.now()
+  const idleThreshold = now - idleDays * 24 * 60 * 60 * 1000
+
+  const all = await listGitWorkspaces(localPath, wsRoot, config)
+  // 只考虑 ttl 候选
+  const ttlWorkspaces = all.filter((w) => w.cleanup === 'ttl')
+
+  const removed: string[] = []
+  const survivors: WorkspaceInfo[] = []
+
+  for (const ws of ttlWorkspaces) {
+    if (opts.activePaths.has(ws.path)) {
+      survivors.push(ws)
+      continue
+    }
+    if (await isWorkspaceDirty(ws, config)) {
+      logger.info({ wsPath: ws.path }, 'TTL cleanup: skipping dirty workspace')
+      survivors.push(ws)
+      continue
+    }
+    if (ws.lastActivityAt != null && ws.lastActivityAt < idleThreshold) {
+      try {
+        await removeGitWorkspace(localPath, wsRoot, ws.name, config)
+        removed.push(ws.name)
+        logger.info(
+          { wsPath: ws.path, lastActivityAt: ws.lastActivityAt },
+          'TTL cleanup: removed idle workspace',
+        )
+      } catch (err) {
+        logger.warn({ err, wsPath: ws.path }, 'TTL cleanup: failed to remove idle workspace')
+        survivors.push(ws)
+      }
+    } else {
+      survivors.push(ws)
+    }
+  }
+
+  // LRU：survivors 按 lastActivityAt 倒序，超容量的尾部淘汰
+  if (survivors.length > lruCap) {
+    survivors.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))
+    const excess = survivors.slice(lruCap)
+    for (const ws of excess) {
+      if (opts.activePaths.has(ws.path)) continue
+      if (await isWorkspaceDirty(ws, config)) continue
+      try {
+        await removeGitWorkspace(localPath, wsRoot, ws.name, config)
+        removed.push(ws.name)
+        logger.info({ wsPath: ws.path }, 'TTL cleanup: removed LRU excess workspace')
+      } catch (err) {
+        logger.warn({ err, wsPath: ws.path }, 'TTL cleanup: failed to remove LRU excess workspace')
+      }
+    }
+  }
+
+  return removed
+}
+
+async function isWorkspaceDirty(ws: WorkspaceInfo, config: GitConfig): Promise<boolean> {
+  const dirs = config.repos?.length
+    ? config.repos.map((r) => join(ws.path, r.directory))
+    : [ws.path]
+  for (const dir of dirs) {
+    if (!existsSync(dir)) continue
+    try {
+      // 用 pathspec 排除我们自己写的状态文件（只在 wsPath 根存在），避免误判 dirty
+      const { stdout } = await execFileAsync(
+        'git',
+        [
+          'status',
+          '--porcelain',
+          '--',
+          '.',
+          `:!${WORKSPACE_STATE_FILE}`,
+          `:!${WORKSPACE_STATE_FILE}.*.tmp`,
+        ],
+        { cwd: dir, timeout: 5_000 },
+      )
+      if (stdout.trim()) return true
+    } catch {
+      /* 读不到状态视为不 dirty，让 remove 自行处理 */
+    }
+  }
+  return false
+}

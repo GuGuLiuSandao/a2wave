@@ -1,0 +1,5 @@
+pnpm exec lint-staged
+node scripts/gates/check-forbidden-tokens.mjs
+node scripts/gates/check-arch-rules.mjs
+node scripts/gates/check-docker-context.mjs
+node scripts/gates/check-file-lines.mjs

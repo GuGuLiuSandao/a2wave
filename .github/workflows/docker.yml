@@ -1,0 +1,76 @@
+# a2wave Docker image — multi-arch build & push to GHCR.
+#
+# Triggered by pushing any v* tag, or manually via workflow_dispatch.
+# The Dockerfile at the repo root is self-contained; APP_VERSION is optional.
+
+name: Docker
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        run: |
+          # Strip a leading "v" from the tag (e.g. v0.8.0 -> 0.8.0); for manual
+          # runs (branch ref) keep the ref name as-is. Branch names commonly
+          # contain "/" (feat/…, chore/…), which is illegal in a Docker tag and
+          # would otherwise fail the push *after* the full multi-arch build.
+          VERSION="$(printf '%s' "${GITHUB_REF_NAME#v}" | tr '/' '-')"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          # GHCR image names must be lowercase.
+          IMAGE="ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+          # `latest` must only ever point at a released, stable v* tag.
+          # Two things would otherwise move it wrongly:
+          #   - a manual run, which builds from an arbitrary branch ref;
+          #   - a prerelease tag like v1.0.0-rc1, which release.yml's stricter
+          #     pattern does not even publish a Release for.
+          # Match the exact semver shape release.yml uses.
+          TAGS="${IMAGE}:${VERSION}"
+          if [ "${{ github.ref_type }}" = "tag" ] &&
+             printf '%s' "${GITHUB_REF_NAME}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            TAGS="${TAGS}
+          ${IMAGE}:latest"
+          fi
+          {
+            echo 'tags<<EOF'
+            echo "${TAGS}"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}

@@ -1,0 +1,115 @@
+import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import {
+  getDefaultScmWorkspacesAllowedRoot,
+  validateScmWorkspacesRoot,
+  validateStoredScmWorkspacesRoot,
+} from '../scm-workspace-safety.js'
+
+describe('validateScmWorkspacesRoot', () => {
+  const tempDirs: string[] = []
+
+  afterEach(async () => {
+    await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
+  })
+
+  it('allows the platform default root without operator configuration', async () => {
+    const defaultRoot = getDefaultScmWorkspacesAllowedRoot()
+
+    expect(validateScmWorkspacesRoot(join(defaultRoot, 'scm-source'), '')).toBeNull()
+  })
+
+  it('rejects an arbitrary absolute path outside approved roots', async () => {
+    expect(validateScmWorkspacesRoot('/opt/unapproved/worktrees', '')).toMatch(
+      /SCM_WORKSPACES_ALLOWED_ROOTS/,
+    )
+  })
+
+  it('allows a path beneath an explicit operator-approved root', async () => {
+    expect(
+      validateScmWorkspacesRoot('/srv/a2wave-worktrees/source-a', '/srv/a2wave-worktrees'),
+    ).toBeNull()
+  })
+
+  it('keeps path casing significant on macOS and Linux filesystems', async () => {
+    for (const platform of ['darwin', 'linux'] as const) {
+      expect(
+        validateScmWorkspacesRoot('/srv/Allowed/source-a', '/srv/allowed', {
+          platform,
+          protectedPaths: ['/unrelated'],
+        }),
+      ).toMatch(/SCM_WORKSPACES_ALLOWED_ROOTS/)
+    }
+  })
+
+  it('retains Windows case-insensitive comparison semantics', async () => {
+    expect(
+      validateScmWorkspacesRoot('/srv/Allowed/source-a', '/srv/allowed', {
+        platform: 'win32',
+        protectedPaths: ['/unrelated'],
+      }),
+    ).toBeNull()
+  })
+
+  it('allows an admin-selected dedicated root while retaining protected-path checks', async () => {
+    expect(
+      validateScmWorkspacesRoot('/srv/admin-selected/source-a', '', {
+        allowOutsideConfiguredRoots: true,
+        protectedPaths: ['/app/data'],
+      }),
+    ).toBeNull()
+  })
+
+  it('rejects platform storage even when an operator configures a broad allowed root', async () => {
+    expect(
+      validateScmWorkspacesRoot('/app/data/skills/worktrees', '/app/data', {
+        protectedPaths: ['/app/data/skills'],
+      }),
+    ).toMatch(/protected platform storage/)
+  })
+
+  it('rejects a filesystem root that would contain protected platform storage', async () => {
+    expect(
+      validateScmWorkspacesRoot('/', '', {
+        allowOutsideConfiguredRoots: true,
+        protectedPaths: ['/app/data'],
+      }),
+    ).toMatch(/protected platform storage/)
+  })
+
+  it('rejects a symlink that escapes an approved root', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scm-workspace-root-'))
+    const outside = await mkdtemp(join(tmpdir(), 'scm-workspace-outside-'))
+    tempDirs.push(root, outside)
+    await mkdir(join(root, 'approved'), { recursive: true })
+    await symlink(outside, join(root, 'approved', 'linked'))
+
+    expect(
+      validateScmWorkspacesRoot(
+        join(root, 'approved', 'linked', 'source-a'),
+        join(root, 'approved'),
+        { protectedPaths: [join(tmpdir(), 'unrelated-protected-path')] },
+      ),
+    ).toMatch(/SCM_WORKSPACES_ALLOWED_ROOTS/)
+  })
+
+  it('fails closed for a legacy non-admin source outside approved roots', async () => {
+    expect(
+      await validateStoredScmWorkspacesRoot(
+        { id: 'scm_legacy', workspacesPath: '/legacy/custom/workspaces', userId: 'usr_user' },
+        false,
+      ),
+    ).toMatch(/Unsafe saved workspacesPath.*approved dedicated root/)
+  })
+
+  it('keeps an active admin-owned dedicated custom root compatible', async () => {
+    expect(
+      await validateStoredScmWorkspacesRoot(
+        { id: 'scm_admin', workspacesPath: '/srv/admin-selected/source-a', userId: 'usr_admin' },
+        true,
+      ),
+    ).toBeNull()
+  })
+})

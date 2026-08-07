@@ -1,0 +1,295 @@
+/**
+ * Tests for the connection probe in the SCM source form.
+ *
+ * The probe tests the config *currently in the form* (unlike the Sync tab's
+ * "Check Connection", which tests the saved config by id), so the properties
+ * that matter are: it is reachable in create mode, it submits the edited values
+ * rather than the stored ones, and a multi-repo failure names the repo that
+ * failed instead of only reporting a count.
+ */
+import i18n from '@/i18n'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const idleMutation = () => ({
+  mutate: vi.fn(),
+  mutateAsync: vi.fn().mockResolvedValue({ data: {} }),
+  isPending: false,
+  isError: false,
+  isSuccess: false,
+  error: null as Error | null,
+  data: undefined as unknown,
+  reset: vi.fn(),
+})
+
+const GIT_SOURCE = {
+  id: 'scm_1',
+  name: 'My Repo',
+  description: '',
+  type: 'git',
+  localPath: '/tmp/repo',
+  workspacesPath: null,
+  isEnabled: true,
+  initialSyncCompletedAt: null,
+  config: { type: 'git', repoUrl: 'https://example.com/x.git', branch: 'main', pat: '********' },
+}
+
+const MULTI_REPO_SOURCE = {
+  ...GIT_SOURCE,
+  config: {
+    type: 'git',
+    repoUrl: '',
+    branch: 'main',
+    repos: [{ repoUrl: 'https://example.com/a.git', branch: 'main', directory: '' }],
+  },
+}
+
+/**
+ * `useScmSource`'s result feeds a `useEffect([source, reset])` that resets the
+ * form. Returning a fresh object identity per call therefore re-runs that effect
+ * forever and hangs the worker — so every query result here must be a stable
+ * module-level constant, never an inline literal.
+ */
+const GIT_RESULT = { data: GIT_SOURCE, isPending: false, error: null }
+const MULTI_REPO_RESULT = { data: MULTI_REPO_SOURCE, isPending: false, error: null }
+const EMPTY_RESULT = { data: undefined, isPending: false, error: null }
+
+const probeMock = vi.fn(idleMutation)
+const sourceMock = vi.fn(() => GIT_RESULT)
+
+vi.mock('@/hooks/use-scm-sources', () => ({
+  useScmSource: (...args: unknown[]) => sourceMock(...(args as [])),
+  useScmSourceStatus: vi.fn(() => ({ data: { syncStatus: 'idle' } })),
+  useScmSourceWorkspaces: vi.fn(() => ({
+    data: { workspaces: [] },
+    isLoading: false,
+    refetch: vi.fn(),
+  })),
+  useCreateScmSource: vi.fn(() => idleMutation()),
+  useUpdateScmSource: vi.fn(() => idleMutation()),
+  useDeleteScmSource: vi.fn(() => idleMutation()),
+  useSyncScmSource: vi.fn(() => idleMutation()),
+  useCheckScmSource: vi.fn(() => idleMutation()),
+  useProbeScmSource: (...args: unknown[]) => probeMock(...(args as [])),
+  useReindexScmCodegraph: vi.fn(() => idleMutation()),
+  useDeleteScmWorkspace: vi.fn(() => idleMutation()),
+}))
+
+import { ScmSourceForm } from '../scm-source-form'
+
+function renderForm(sourceId?: string) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
+  })
+  function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  }
+  return render(<ScmSourceForm sourceId={sourceId} onSaved={() => {}} onDeleted={() => {}} />, {
+    wrapper: Wrapper,
+  })
+}
+
+beforeEach(async () => {
+  await i18n.changeLanguage('en')
+  vi.clearAllMocks()
+  probeMock.mockImplementation(idleMutation)
+  sourceMock.mockImplementation(() => GIT_RESULT)
+})
+
+describe('ScmSourceForm — connection probe', () => {
+  it('offers the probe button in create mode, before a source exists', () => {
+    sourceMock.mockImplementation(() => EMPTY_RESULT as never)
+    renderForm(undefined)
+
+    expect(screen.getByRole('button', { name: /Test Connection/i })).toBeInTheDocument()
+  })
+
+  it('submits the edited form values, not the stored config', async () => {
+    const mutate = vi.fn()
+    probeMock.mockImplementation(() => ({ ...idleMutation(), mutate }))
+    const user = userEvent.setup()
+    renderForm('scm_1')
+
+    const repoUrl = screen.getByLabelText(/Repository URL/i)
+    await user.clear(repoUrl)
+    await user.type(repoUrl, 'https://example.com/edited.git')
+    await user.click(screen.getByRole('button', { name: /Test Connection/i }))
+
+    expect(mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'git',
+        sourceId: 'scm_1',
+        config: expect.objectContaining({ repoUrl: 'https://example.com/edited.git' }),
+      }),
+    )
+  })
+
+  it('passes no sourceId in create mode', async () => {
+    sourceMock.mockImplementation(() => EMPTY_RESULT as never)
+    const mutate = vi.fn()
+    probeMock.mockImplementation(() => ({ ...idleMutation(), mutate }))
+    const user = userEvent.setup()
+    renderForm(undefined)
+
+    await user.type(screen.getByLabelText(/Repository URL/i), 'https://example.com/new.git')
+    await user.click(screen.getByRole('button', { name: /Test Connection/i }))
+
+    expect(mutate).toHaveBeenCalledWith(expect.objectContaining({ sourceId: undefined }))
+  })
+
+  it('blocks the probe in create mode when no repo URL has been entered', async () => {
+    sourceMock.mockImplementation(() => EMPTY_RESULT as never)
+    const mutate = vi.fn()
+    probeMock.mockImplementation(() => ({ ...idleMutation(), mutate }))
+    const user = userEvent.setup()
+    renderForm(undefined)
+
+    await user.click(screen.getByRole('button', { name: /Test Connection/i }))
+
+    expect(mutate).not.toHaveBeenCalled()
+    expect(screen.getByText(/Enter a repository URL first/i)).toBeInTheDocument()
+  })
+
+  it('blocks the probe when a multi-repo entry has a blank directory', async () => {
+    // `directory` is `.min(1)` in the schema, so submitting a blank one returns a
+    // bare "Invalid probe input" that names no field. Catch it client-side and
+    // say which field is missing instead.
+    sourceMock.mockImplementation(() => MULTI_REPO_RESULT as never)
+    const mutate = vi.fn()
+    probeMock.mockImplementation(() => ({ ...idleMutation(), mutate }))
+    const user = userEvent.setup()
+    renderForm('scm_1')
+
+    await user.click(screen.getByRole('button', { name: /Test All Repos/i }))
+
+    expect(mutate).not.toHaveBeenCalled()
+    expect(screen.getByText(/Give every repository a directory name first/i)).toBeInTheDocument()
+  })
+
+  it('names the failing repo in a multi-repo result instead of only a count', () => {
+    sourceMock.mockImplementation(() => MULTI_REPO_RESULT as never)
+    probeMock.mockImplementation(() => ({
+      ...idleMutation(),
+      data: {
+        data: {
+          ok: false,
+          message: '1/2 repos connected, failed: repo-b',
+          repos: [
+            { directory: 'repo-a', repoUrl: 'https://x/a.git', ok: true, message: 'healthy' },
+            {
+              directory: 'repo-b',
+              repoUrl: 'https://x/b.git',
+              ok: false,
+              message: 'Authentication failed',
+            },
+          ],
+        },
+      },
+    }))
+    renderForm('scm_1')
+
+    expect(screen.getByText('repo-b')).toBeInTheDocument()
+    expect(screen.getByText(/Authentication failed/i)).toBeInTheDocument()
+    expect(screen.getByText('repo-a')).toBeInTheDocument()
+  })
+
+  /**
+   * A one-repo multi-repo source aggregates to "0/1 repos connected, failed:
+   * <dir>" — a count with no reason, which is precisely what the per-repo
+   * breakdown exists to replace. Gating the list on repo *count* hid it in the
+   * one case that needed it most.
+   */
+  it('gives the reason for a single repo in multi-repo mode', () => {
+    sourceMock.mockImplementation(() => MULTI_REPO_RESULT as never)
+    probeMock.mockImplementation(() => ({
+      ...idleMutation(),
+      data: {
+        data: {
+          ok: false,
+          message: '0/1 repos connected, failed: only-repo',
+          repos: [
+            {
+              directory: 'only-repo',
+              repoUrl: 'https://x/a.git',
+              ok: false,
+              message: 'Repository not found',
+            },
+          ],
+        },
+      },
+    }))
+    renderForm('scm_1')
+
+    expect(screen.getByText(/Repository not found/i)).toBeInTheDocument()
+  })
+
+  /**
+   * `scmType` is `useState`, not a react-hook-form field, so switching it never
+   * sets `isDirty` — an invalidation guard keyed only on `isDirty` would skip
+   * the reset and leave a Git result sitting next to empty Perforce fields.
+   */
+  it('clears a probe result when the SCM type is switched in create mode', async () => {
+    sourceMock.mockImplementation(() => EMPTY_RESULT as never)
+    const reset = vi.fn()
+    probeMock.mockImplementation(() => ({
+      ...idleMutation(),
+      reset,
+      data: { data: { ok: true, message: 'Connected', repos: [] } },
+    }))
+    renderForm(undefined)
+
+    expect(reset).not.toHaveBeenCalled()
+
+    // antd's Segmented renders the real radio under `pointer-events: none`, so
+    // drive it with a change event rather than a synthetic pointer click.
+    fireEvent.click(screen.getByRole('radio', { name: /Perforce/i }))
+
+    expect(reset).toHaveBeenCalled()
+  })
+
+  /**
+   * A green check must never outlive the config it describes: probe URL A, edit
+   * the field to B, and a result left on screen would invite saving B as though
+   * it had been tested.
+   */
+  it('clears a probe result once a connection field is edited', async () => {
+    const reset = vi.fn()
+    probeMock.mockImplementation(() => ({
+      ...idleMutation(),
+      reset,
+      data: { data: { ok: true, message: 'Connected', repos: [] } },
+    }))
+    renderForm('scm_1')
+
+    expect(reset).not.toHaveBeenCalled()
+
+    const urlInput = screen.getByDisplayValue('https://example.com/x.git')
+    await userEvent.type(urlInput, '-edited')
+
+    expect(reset).toHaveBeenCalled()
+  })
+
+  it('shows a successful probe result', () => {
+    probeMock.mockImplementation(() => ({
+      ...idleMutation(),
+      data: { data: { ok: true, message: '2/2 repos connected', repos: [] } },
+    }))
+    renderForm('scm_1')
+
+    expect(screen.getByText(/2\/2 repos connected/i)).toBeInTheDocument()
+  })
+
+  it('surfaces a rejected probe request rather than failing silently', () => {
+    probeMock.mockImplementation(() => ({
+      ...idleMutation(),
+      isError: true,
+      error: new Error('SCM source not found'),
+    }))
+    renderForm('scm_1')
+
+    expect(screen.getByText(/SCM source not found/i)).toBeInTheDocument()
+  })
+})

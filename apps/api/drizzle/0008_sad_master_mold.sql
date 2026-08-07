@@ -1,0 +1,1 @@
+ALTER TABLE `nodes` ADD `os_type` text;

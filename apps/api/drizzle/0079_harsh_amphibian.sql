@@ -1,0 +1,1 @@
+ALTER TABLE `evaluation_tasks` ADD `cancel_requested_at` integer;

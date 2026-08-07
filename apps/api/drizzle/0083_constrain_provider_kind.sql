@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `providers_kind_unique` ON `providers` (`kind`);

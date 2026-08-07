@@ -1,0 +1,43 @@
+# Dependency and Action updates for the public repository.
+#
+# The root package.json carries a large `pnpm.overrides` block pinning transitive
+# security fixes, which is maintained by hand today. Dependabot surfaces the
+# advisories that block would otherwise be updated for only after someone noticed.
+#
+# Grouped deliberately: a monorepo of this size produces enough weekly PRs to
+# drown the review queue, and a lockfile-only bump is not worth one PR per package.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    # pnpm workspaces resolve from the single root lockfile, so one entry covers
+    # every app and package.
+    versioning-strategy: increase-if-necessary
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+      production-minor-patch:
+        dependency-type: production
+        update-types: [minor, patch]
+    labels: [dependencies]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      github-actions:
+        patterns: ['*']
+    labels: [dependencies, ci]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels: [dependencies, docker]

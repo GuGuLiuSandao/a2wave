@@ -1,0 +1,1 @@
+CREATE INDEX `runs_status_updated_at_idx` ON `runs` (`status`,`updated_at`);

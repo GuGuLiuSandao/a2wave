@@ -1,0 +1,1 @@
+ALTER TABLE `feishu_card_callbacks` ADD `original_message_id` text;

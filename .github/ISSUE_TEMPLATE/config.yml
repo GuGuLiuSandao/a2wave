@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/LilithGames/a2wave/security/advisories/new
+    about: Please report security vulnerabilities privately, not as public issues. See SECURITY.md.
+  - name: Questions & Discussions
+    url: https://github.com/LilithGames/a2wave/discussions
+    about: Ask questions and discuss ideas with the community.

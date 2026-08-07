@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `onboarding` text DEFAULT '{}' NOT NULL;

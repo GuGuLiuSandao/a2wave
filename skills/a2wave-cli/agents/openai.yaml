@@ -1,0 +1,4 @@
+interface:
+  display_name: "a2wave CLI"
+  short_description: "管理 a2wave Agent、Skill、Run 与 CLI 更新。"
+  default_prompt: "使用 $a2wave-cli 检查我的 a2wave 状态，并通过命令行诊断一个 Agent。"

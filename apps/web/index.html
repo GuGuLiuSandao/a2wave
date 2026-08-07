@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/brand-icons/default.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f8f8f7" />
+    <title>A2WAVE - Agent Workflow</title>
+    <script>
+      ;(() => {
+        const fallback = { preference: 'system', theme: 'wave-light', appearance: 'light' }
+        try {
+          const ids = ['wave-light', 'wave-dark', 'neo-yellow', 'midnight', 'forest', 'graphite']
+          const stored = localStorage.getItem('a2wave.theme')
+          const preference = stored === 'system' || ids.includes(stored) ? stored : 'system'
+          const systemDark = matchMedia('(prefers-color-scheme: dark)').matches
+          const theme = preference === 'system' ? (systemDark ? 'wave-dark' : 'wave-light') : preference
+          const appearance = ['wave-dark', 'midnight', 'forest', 'graphite'].includes(theme)
+            ? 'dark'
+            : 'light'
+          fallback.preference = preference
+          fallback.theme = theme
+          fallback.appearance = appearance
+        } catch {
+          // Storage can be disabled. Wave Light remains a safe first-paint default.
+        }
+        const root = document.documentElement
+        root.dataset.themePreference = fallback.preference
+        root.dataset.theme = fallback.theme
+        root.dataset.appearance = fallback.appearance
+        root.classList.toggle('dark', fallback.appearance === 'dark')
+        root.style.colorScheme = fallback.appearance
+      })()
+    </script>
+  </head>
+  <body class="min-h-screen bg-background text-foreground antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

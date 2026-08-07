@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `artifact_policy` text;

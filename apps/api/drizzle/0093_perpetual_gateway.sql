@@ -1,0 +1,1 @@
+CREATE INDEX `runs_initiator_agent_created_at_idx` ON `runs` (`initiator_agent_id`,`created_at`);

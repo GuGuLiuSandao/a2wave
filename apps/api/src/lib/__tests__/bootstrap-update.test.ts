@@ -1,0 +1,267 @@
+/**
+ * Covers the "existing row" update branches in bootstrapScmP4 / bootstrapScmGit
+ * and the localPath-conflict skip branch — the parts bootstrap.test.ts doesn't
+ * reach.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const envMock = {
+  SCM_P4_PORT: '',
+  SCM_P4_USER: '',
+  SCM_P4_PASSWD: '',
+  SCM_P4_CLIENT: '',
+  SCM_P4_DEPOT_PATH: '',
+  SCM_P4_AUTO_SYNC: true,
+  SCM_P4_SYNC_INTERVAL: 30,
+  SCM_P4_LOCAL_PATH: '/var/p4',
+  SCM_GIT_REPO_URL: '',
+  SCM_GIT_BRANCH: 'main',
+  SCM_GIT_USERNAME: '',
+  SCM_GIT_PAT: '',
+  SCM_GIT_AUTO_SYNC: true,
+  SCM_GIT_SYNC_INTERVAL: 30,
+  SCM_GIT_LOCAL_PATH: '/var/git',
+}
+
+vi.mock('../../env.js', () => ({
+  get env() {
+    return envMock
+  },
+}))
+
+const dbSelect = vi.fn()
+const dbInsertRun = vi.fn()
+const dbUpdateRun = vi.fn()
+// Production awaits `db.insert(t).values(...)` / `db.update(t).set(...).where(...)`,
+// so the write is recorded on the awaited terminator instead of a `.run()` call.
+const insertChain = {
+  values: vi.fn(async (...a: unknown[]) => {
+    dbInsertRun(...a)
+    return []
+  }),
+}
+const updateChain = {
+  set: vi.fn().mockReturnThis(),
+  where: vi.fn(async (...a: unknown[]) => {
+    dbUpdateRun(...a)
+    return []
+  }),
+}
+
+vi.mock('../../db/client.js', () => ({
+  db: {
+    select: (...a: unknown[]) => dbSelect(...a),
+    insert: () => insertChain,
+    update: () => updateChain,
+  },
+}))
+
+vi.mock('../../db/schema.js', () => ({
+  scmSources: {
+    id: 'scmSources.id',
+    name: 'scmSources.name',
+    localPath: 'scmSources.localPath',
+  },
+  settings: { category: 'settings.category', key: 'settings.key' },
+}))
+
+vi.mock('../id.js', () => ({ createId: vi.fn((p) => `${p}_test`) }))
+
+vi.mock('../logger.js', () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}))
+
+import { bootstrapFromEnv } from '../bootstrap.js'
+
+// `bootstrapFromEnv()` returns void but its body kicks off async upserts, so the
+// tests must let the microtask queue drain before asserting on the db mock.
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+function makeChain() {
+  const c: Record<string, ReturnType<typeof vi.fn>> = {}
+  for (const k of [
+    'from',
+    'where',
+    'limit',
+    'orderBy',
+    'offset',
+    'groupBy',
+    'having',
+    'returning',
+  ]) {
+    c[k] = vi.fn((): unknown => __chain)
+  }
+  c.get = vi.fn()
+  c.all = vi.fn()
+
+  // Awaiting the chain yields what `.get()`/`.all()` was configured to return,
+  // as an array — production code destructures `[row]` from `.limit(1)` now.
+  // The original mock fns stay reachable, so existing assertions are unaffected.
+  let __settled: Promise<unknown[]> | undefined
+  const __rows = (): unknown[] => {
+    // `get` before `all`: mocks often define both, with `all` a placeholder.
+    const get = c.get as undefined | (() => unknown)
+    if (get) {
+      const row = get()
+      if (row != null) return [row]
+    }
+    const all = c.all as undefined | (() => unknown)
+    if (all) {
+      const v = all()
+      return Array.isArray(v) ? v : v == null ? [] : [v]
+    }
+    if (get) return []
+    const run = c.run as undefined | (() => unknown)
+    if (run) {
+      const res = run() as { changes?: number } | undefined
+      const changes = typeof res?.changes === 'number' ? res.changes : 1
+      return Array.from({ length: changes }, () => ({}))
+    }
+    return []
+  }
+  const __chain = Object.assign(
+    {
+      // Lazy: resolving eagerly would consume a queued `get` per intermediate
+      // node while the chain is still being built.
+      // biome-ignore lint/suspicious/noThenProperty: intentionally a thenable — it stands in for drizzle's awaitable query builder.
+      then: (f?: (v: unknown[]) => unknown, r?: (e: unknown) => unknown) => {
+        __settled ??= Promise.resolve().then(__rows)
+        return __settled.then(f, r)
+      },
+      catch: (r?: (e: unknown) => unknown) => {
+        __settled ??= Promise.resolve().then(__rows)
+        return __settled.catch(r)
+      },
+    },
+    c,
+  )
+  for (const k of Object.keys(c)) {
+    const fn = c[k] as unknown
+    if (typeof fn === 'function' && !['get', 'all', 'run'].includes(k)) {
+      ;(__chain as Record<string, unknown>)[k] = fn
+    }
+  }
+  return __chain as unknown as typeof c
+}
+
+function queueSelects(...returns: Array<{ get?: unknown; all?: unknown }>) {
+  let i = 0
+  dbSelect.mockImplementation(() => {
+    const cfg = returns[i++] ?? {}
+    const c = makeChain()
+    if ('get' in cfg) c.get.mockReturnValue(cfg.get)
+    // 网关 token 回填读 jwtSigner 全部行；默认空数组 = 无既有签名器，跳过回填。
+    c.all.mockReturnValue('all' in cfg ? cfg.all : [])
+    return c
+  })
+}
+
+beforeEach(() => {
+  dbSelect.mockReset()
+  dbInsertRun.mockReset()
+  dbUpdateRun.mockReset()
+  insertChain.values.mockClear()
+  updateChain.set.mockClear()
+  updateChain.where.mockClear()
+  for (const key of Object.keys(envMock)) {
+    if (typeof envMock[key as keyof typeof envMock] === 'string') {
+      // @ts-expect-error reset string fields
+      envMock[key] = ''
+    }
+  }
+  envMock.SCM_P4_LOCAL_PATH = '/var/p4'
+  envMock.SCM_GIT_LOCAL_PATH = '/var/git'
+  envMock.SCM_GIT_BRANCH = 'main'
+  envMock.SCM_P4_AUTO_SYNC = true
+  envMock.SCM_P4_SYNC_INTERVAL = 30
+  envMock.SCM_GIT_AUTO_SYNC = true
+  envMock.SCM_GIT_SYNC_INTERVAL = 30
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+describe('bootstrapScmP4 — update path', () => {
+  it('updates the existing env:p4 row in place (no insert)', async () => {
+    envMock.SCM_P4_PORT = '1666'
+    envMock.SCM_P4_USER = 'admin'
+    envMock.SCM_P4_CLIENT = 'workspace'
+
+    queueSelects(
+      { get: { id: 'scm_existing', localPath: '/var/p4' } },
+      // For SCM_GIT_REPO_URL empty path, no further selects expected.
+    )
+
+    bootstrapFromEnv()
+    await flush()
+    expect(dbUpdateRun).toHaveBeenCalledTimes(1)
+    expect(dbInsertRun).not.toHaveBeenCalled()
+  })
+
+  it('skips when local path conflict points to a different existing row', async () => {
+    envMock.SCM_P4_PORT = '1666'
+    envMock.SCM_P4_USER = 'admin'
+    envMock.SCM_P4_CLIENT = 'workspace'
+    envMock.SCM_P4_LOCAL_PATH = '/new/path'
+
+    queueSelects(
+      { get: { id: 'scm_existing', localPath: '/old/path' } }, // find by name
+      { get: { id: 'scm_conflict', localPath: '/new/path' } }, // localPath conflict
+    )
+
+    bootstrapFromEnv()
+    await flush()
+    expect(dbUpdateRun).not.toHaveBeenCalled()
+  })
+
+  it('skips on insert path when the localPath is already used by another source', async () => {
+    envMock.SCM_P4_PORT = '1666'
+    envMock.SCM_P4_USER = 'admin'
+    envMock.SCM_P4_CLIENT = 'workspace'
+
+    queueSelects(
+      { get: undefined }, // no existing env:p4
+      { get: { id: 'scm_conflict', localPath: '/var/p4' } }, // localPath taken
+    )
+
+    bootstrapFromEnv()
+    await flush()
+    expect(dbInsertRun).not.toHaveBeenCalled()
+  })
+})
+
+describe('bootstrapScmGit — update path', () => {
+  it('updates the existing env:git row in place', async () => {
+    envMock.SCM_GIT_REPO_URL = 'https://example/repo.git'
+    queueSelects({ get: { id: 'scm_g', localPath: '/var/git' } })
+
+    bootstrapFromEnv()
+    await flush()
+    expect(dbUpdateRun).toHaveBeenCalledTimes(1)
+    expect(dbInsertRun).not.toHaveBeenCalled()
+  })
+
+  it('skips when local path conflict points to a different row', async () => {
+    envMock.SCM_GIT_REPO_URL = 'https://example/repo.git'
+    envMock.SCM_GIT_LOCAL_PATH = '/new/path'
+
+    queueSelects(
+      { get: { id: 'scm_g', localPath: '/old/path' } },
+      { get: { id: 'scm_other', localPath: '/new/path' } },
+    )
+
+    bootstrapFromEnv()
+    await flush()
+    expect(dbUpdateRun).not.toHaveBeenCalled()
+  })
+
+  it('skips on insert path when localPath is taken', async () => {
+    envMock.SCM_GIT_REPO_URL = 'https://example/repo.git'
+    queueSelects({ get: undefined }, { get: { id: 'scm_other', localPath: '/var/git' } })
+
+    bootstrapFromEnv()
+    await flush()
+    expect(dbInsertRun).not.toHaveBeenCalled()
+  })
+})

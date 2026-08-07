@@ -1,0 +1,7 @@
+[
+  {
+    "path": "apps/api/src/lib/__tests__/feishu-service.test.ts",
+    "maxLines": 3756,
+    "reason": "存量债务：门禁上线时已 3756 行，冻结基线，只许瘦身不许再涨；应按场景拆成多个测试文件"
+  }
+]

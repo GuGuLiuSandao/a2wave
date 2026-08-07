@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `schedule_run_as_owner` integer DEFAULT false NOT NULL;

@@ -1,0 +1,2 @@
+ALTER TABLE `runs` ADD `execution_metadata` text;--> statement-breakpoint
+CREATE UNIQUE INDEX `runs_oauth_active_session_unique` ON `runs` (`initiator_agent_id`,`trigger_source`,`trigger_session_id`) WHERE trigger_source = 'oauth' AND trigger_session_id IS NOT NULL AND status IN ('pending', 'queued', 'running');

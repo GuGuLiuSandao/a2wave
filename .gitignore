@@ -1,0 +1,92 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.output/
+
+# Database
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+apps/api/data/
+/data/
+
+# Environment — everything but the committed template
+.env*
+!.env.example
+
+# IDE
+.vscode/
+!.vscode/extensions.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Playwright
+test-results/
+playwright-report/
+e2e/.auth/
+
+# Coverage
+coverage/
+
+# Stryker mutation testing — HTML reports + incremental cache
+**/reports/mutation/
+.stryker-tmp/
+
+# Misc
+*.tsbuildinfo
+# Stray tree created when DATABASE_URL is passed as a `file:` URL — better-sqlite3
+# takes the whole string as a literal relative path and mkdir -p's it.
+apps/*/file:/
+*.kubeconfig
+.kubeconfig
+kubeconfig
+
+# Secrets / credentials — never commit these
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+*-oauth.json
+**/.credentials.json
+**/auth.json
+.a2wave/
+.claude/worktrees/
+.claude/settings.local.json
+
+# Repo maintenance playbook + per-round reports — local operational artifacts
+.maintenance/
+.maintenance-v2/
+
+# Local Codex harness/config
+.codex/
+.mcp.json
+
+# CodeGraph — local index/runtime data (db, sockets, pid, logs)
+.codegraph/
+
+# Local docker-compose overrides (e.g. Docker Desktop for Mac workarounds) — machine-specific
+docker-compose.override.yml
+.local-data/
+
+# Local working notes
+TODO.md
+TASK.md
+
+# Deploy-script test reports — regenerated on every `node --test scripts/deploy`
+scripts/deploy/__tests__/reports/

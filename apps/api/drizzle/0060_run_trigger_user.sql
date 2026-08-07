@@ -1,0 +1,14 @@
+-- Add denormalized trigger_user_name column.
+-- Backfill is intentionally NOT performed inside the migration: a correlated
+-- subquery + json_extract over run_steps would hold a long-running write lock
+-- on a large `runs` table and block the first request after deploy. The column
+-- is populated for runs created from here on; rows that predate this migration
+-- keep a NULL `trigger_user_name` permanently.
+--
+-- Readers do NOT derive it from run_steps. A NULL therefore renders as an empty
+-- asker in the run lists, and the `askerCount` / leaderboard `byUsers`
+-- aggregations (COUNT(DISTINCT trigger_user_name)) skip those rows entirely, so
+-- an upgraded instance under-reports distinct users over its pre-0060 history.
+-- To repair it, backfill from run_steps[0].input.context during a maintenance
+-- window.
+ALTER TABLE `runs` ADD `trigger_user_name` text;

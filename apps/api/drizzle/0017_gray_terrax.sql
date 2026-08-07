@@ -1,0 +1,1 @@
+ALTER TABLE `providers` ADD `skills_dir` text;

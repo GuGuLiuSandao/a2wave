@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `auth_mode` text DEFAULT 'apiKey' NOT NULL;

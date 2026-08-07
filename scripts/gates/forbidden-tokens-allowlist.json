@@ -1,0 +1,9 @@
+{
+  "_comment": "密钥扫描放行清单。literals: 出现即放行该行的精确占位/公钥值；paths: 放行的文件路径前缀。新增前请确认该值确实非敏感（占位、公钥、测试 fixture）。",
+  "literals": [
+    "E2eTest123@",
+    "-----BEGIN PRIVATE KEY-----\\nFAKE\\n-----END PRIVATE KEY-----",
+    "ops-script-placeholder-secret-unused"
+  ],
+  "paths": []
+}

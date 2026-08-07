@@ -1,0 +1,68 @@
+import i18n from '@/i18n'
+import { type ClassValue, clsx } from 'clsx'
+import { twMerge } from 'tailwind-merge'
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+
+/** Clipboard fallback for non-secure contexts (e.g. LAN HTTP access) */
+export async function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
+}
+
+/** Generate a unique ID, with fallback for non-secure contexts (e.g. LAN HTTP) */
+export function uniqueId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)
+}
+
+export function formatRelativeTime(date: Date | string | number | null | undefined): string {
+  if (date == null) return i18n.t('time.never')
+
+  const d =
+    date instanceof Date
+      ? date
+      : new Date(typeof date === 'number' && date < 1e12 ? date * 1000 : date)
+  if (Number.isNaN(d.getTime())) return i18n.t('time.never')
+
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  const diffSec = Math.floor(diffMs / 1000)
+  const diffMin = Math.floor(diffSec / 60)
+  const diffHour = Math.floor(diffMin / 60)
+  const diffDay = Math.floor(diffHour / 24)
+
+  if (diffSec < 60) return i18n.t('time.justNow')
+  if (diffMin < 60) return i18n.t('time.minutesAgo', { count: diffMin })
+  if (diffHour < 24) return i18n.t('time.hoursAgo', { count: diffHour })
+  if (diffDay < 7) return i18n.t('time.daysAgo', { count: diffDay })
+
+  return new Intl.DateTimeFormat(i18n.t('time.absoluteDateLocale'), {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(d)
+}
+
+/** Human-readable duration: `850ms` / `4.2s` / `1m 30s`. */
+export function formatDuration(ms: number | null | undefined): string {
+  if (ms == null) return '—'
+  if (ms < 1000) return `${ms}ms`
+  const sec = ms / 1000
+  if (sec < 60) return `${sec.toFixed(1)}s`
+  const min = Math.floor(sec / 60)
+  const remaining = Math.round(sec % 60)
+  return `${min}m ${remaining}s`
+}

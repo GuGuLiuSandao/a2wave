@@ -1,0 +1,1 @@
+ALTER TABLE `mcp_servers` ADD `admin_only` integer DEFAULT false NOT NULL;

@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `schedule_run_as_user_id` text REFERENCES users(id);

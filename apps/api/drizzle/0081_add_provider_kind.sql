@@ -1,0 +1,1 @@
+ALTER TABLE `providers` ADD `kind` text DEFAULT 'cursor' NOT NULL;

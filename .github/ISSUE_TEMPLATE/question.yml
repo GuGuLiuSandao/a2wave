@@ -1,0 +1,22 @@
+name: Question
+description: Ask a question about using or configuring a2wave
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For open-ended discussion, consider **GitHub Discussions** instead. Please
+        check the [docs](../../docs) and [AGENTS.md](../../AGENTS.md) first.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What are you trying to do, and where are you stuck?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Version, deployment method, and anything you've already tried.

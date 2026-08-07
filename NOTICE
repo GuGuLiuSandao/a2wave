@@ -1,0 +1,82 @@
+a2wave
+Copyright 2026 Lilith Games
+
+This product includes software developed at Lilith Games.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+------------------------------------------------------------------------
+
+Beyond the dependencies resolved at install time — each retained under its own
+license — this distribution embeds the third-party assets listed below in the
+built web bundle and the container image.
+
+FONTS
+
+  Inter (@fontsource-variable/inter)
+  Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
+  Licensed under the SIL Open Font License, Version 1.1.
+  Full license text: licenses/inter-OFL-1.1.txt
+
+The OFL requires this notice to accompany the font files wherever they are
+redistributed, which includes the compiled web assets and any image built from
+this repository.
+
+PROVIDER BRAND ICONS
+
+Agent CLI provider marks in apps/web/src/assets/provider-icons/ are displayed to
+identify which third-party provider a2wave is configured to invoke. Provenance
+for every file, including acquisition dates, is tracked in
+docs/agent/design-tokens.md.
+
+  claude-color.svg, openai.svg
+  Copyright (c) 2023 LobeHub — https://github.com/lobehub/lobe-icons
+  Licensed under the MIT License.
+  Full license text: licenses/lobe-icons-MIT.txt
+
+  pi.svg
+  Copyright (c) 2025 Mario Zechner — https://github.com/earendil-works/pi
+  Licensed under the MIT License.
+  Full license text: licenses/pi-MIT.txt
+
+  cursor.svg
+  Sourced from Simple Icons (https://simpleicons.org), released under CC0 1.0.
+  CC0 waives copyright only; it does not waive trademark rights — see below.
+
+  kimi.png, qoder.svg, trae.png
+  Official brand marks of their respective owners, reproduced from public
+  sources for identification purposes. No copyright license has been granted
+  for these files; they are used as described under TRADEMARKS below.
+
+  opencode.svg
+  A generic terminal glyph, not the official OpenCode brand mark, and not
+  derived from it. Believed to be original work by the a2wave authors and
+  distributed under this repository's Apache License 2.0; authorship is
+  pending confirmation with the contributor who added it.
+
+TRADEMARKS
+
+All product names, logos, and brands appearing in this repository or in the
+software it builds are the property of their respective owners. Their use here
+is nominative: it identifies the third-party tools a2wave can be configured to
+invoke, and nothing more.
+
+Use of these marks does not imply any affiliation with, sponsorship by, or
+endorsement by their respective owners, nor does a2wave's Apache License 2.0
+grant any right to use them. This applies in particular to Anthropic (Claude),
+OpenAI, Cursor, Moonshot AI (Kimi), Alibaba (Qoder), ByteDance (Trae), and the
+Pi and OpenCode projects.
+
+If you own one of these marks and object to its use here, contact the
+maintainers via the repository issue tracker and we will remove or replace the
+asset promptly.

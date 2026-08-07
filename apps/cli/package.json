@@ -1,0 +1,47 @@
+{
+  "name": "a2wave",
+  "version": "0.7.0",
+  "description": "Command-line client for the a2wave agent orchestration platform",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/LilithGames/a2wave#readme",
+  "bugs": {
+    "url": "https://github.com/LilithGames/a2wave/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LilithGames/a2wave.git",
+    "directory": "apps/cli"
+  },
+  "keywords": ["a2wave", "agent", "orchestration", "cli"],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "type": "module",
+  "bin": {
+    "a2wave": "dist/index.cjs"
+  },
+  "files": ["dist", "README.md", "LICENSE", "NOTICE"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsup src/index.ts --format cjs --no-splitting --outDir dist --platform node",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "citty": "^0.1.6",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@vitest/coverage-v8": "^4.1.4",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.4"
+  }
+}

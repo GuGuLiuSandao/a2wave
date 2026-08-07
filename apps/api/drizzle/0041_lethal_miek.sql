@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `a2a_route_targets` text;

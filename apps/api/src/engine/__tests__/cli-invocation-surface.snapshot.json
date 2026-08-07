@@ -1,0 +1,152 @@
+{
+  "$comment": [
+    "The CLI tokens each engine adapter can pass, and the minVersion floor that was current when",
+    "the surface was last confirmed. Guarded by cli-invocation-surface.test.ts.",
+    "A `flag=value` token means the adapter pins that literal value, which is often what a CLI",
+    "version actually introduced (`--output-format stream-json`). A bare word is a subcommand.",
+    "`${}` stands for an interpolated value in a template literal.",
+    "When this file changes, confirm the added tokens exist in the recorded minVersion of that CLI;",
+    "if they do not, raise minVersion in packages/shared/src/schemas/provider.ts too."
+  ],
+  "engines": {
+    "cursor": {
+      "sourceFile": "apps/api/src/engine/cursor-agent.ts",
+      "minVersion": null,
+      "surface": [
+        "--approve-mcps=true",
+        "--force",
+        "--list-models",
+        "--mode=ask",
+        "--model",
+        "--output-format",
+        "--resume",
+        "--trust",
+        "-p",
+        "about",
+        "stream-json"
+      ],
+      "ignoredLiterals": []
+    },
+    "claude-code": {
+      "sourceFile": "apps/api/src/engine/claude-code.ts",
+      "minVersion": null,
+      "surface": [
+        "--allowedTools=mcp__*",
+        "--append-system-prompt",
+        "--dangerously-skip-permissions",
+        "--json",
+        "--model",
+        "--output-format",
+        "--permission-mode=plan",
+        "--resume",
+        "--verbose",
+        "-p",
+        "auth",
+        "status",
+        "stream-json"
+      ],
+      "ignoredLiterals": [
+        {
+          "token": "-s",
+          "reason": "macOS `security find-generic-password` flag, not a claude CLI flag"
+        },
+        {
+          "token": "-w",
+          "reason": "macOS `security find-generic-password` flag, not a claude CLI flag"
+        }
+      ]
+    },
+    "codex": {
+      "sourceFile": "apps/api/src/engine/codex-agent.ts",
+      "minVersion": null,
+      "surface": [
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--json",
+        "--model",
+        "--sandbox=read-only",
+        "--sandbox=workspace-write",
+        "--skip-git-repo-check",
+        "-c",
+        "-c=openai_base_url=${}",
+        "debug",
+        "exec",
+        "login",
+        "models",
+        "resume",
+        "status"
+      ],
+      "ignoredLiterals": [
+        {
+          "token": "--config",
+          "reason": "compared against, never passed: exec_params log redaction of `-c` / `--config` values"
+        }
+      ]
+    },
+    "opencode": {
+      "sourceFile": "apps/api/src/engine/opencode-agent.ts",
+      "minVersion": "1.18.0",
+      "surface": ["--auto", "--format=json", "--session", "-m", "auth", "list", "models", "run"],
+      "ignoredLiterals": []
+    },
+    "qoder": {
+      "sourceFile": "apps/api/src/engine/qoder-agent.ts",
+      "minVersion": "1.0.0",
+      "surface": [
+        "--allowed-tools=mcp__*",
+        "--config-dir",
+        "--dangerously-skip-permissions",
+        "--list-models",
+        "--output-format=stream-json",
+        "--permission-mode=plan",
+        "--resume",
+        "-m",
+        "-p",
+        "status"
+      ],
+      "ignoredLiterals": []
+    },
+    "trae": {
+      "sourceFile": "apps/api/src/engine/trae-agent.ts",
+      "minVersion": "0.120.0",
+      "surface": [
+        "--allowed-tool=mcp__*",
+        "--output-format=stream-json",
+        "--permission-mode=plan",
+        "--query-timeout=${}m",
+        "--resume",
+        "-c=model.name=${}",
+        "-p",
+        "-y",
+        "models"
+      ],
+      "ignoredLiterals": []
+    },
+    "kimi": {
+      "sourceFile": "apps/api/src/engine/kimi-agent.ts",
+      "minVersion": "0.30.0",
+      "surface": ["--json", "--output-format=stream-json", "-m", "-p", "-r", "list", "provider"],
+      "ignoredLiterals": []
+    },
+    "pi": {
+      "sourceFile": "apps/api/src/engine/pi-agent.ts",
+      "minVersion": "0.83.0",
+      "surface": [
+        "--fork",
+        "--list-models",
+        "--mode=json",
+        "--model",
+        "--no-approve",
+        "--no-extensions",
+        "--no-prompt-templates",
+        "--no-skills",
+        "--no-themes",
+        "--offline",
+        "--session-dir",
+        "--session-id",
+        "--skill",
+        "--tools=read,grep,find,ls"
+      ],
+      "ignoredLiterals": []
+    }
+  }
+}

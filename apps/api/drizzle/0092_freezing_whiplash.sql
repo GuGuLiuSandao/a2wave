@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `chat_app_config` text;

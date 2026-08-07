@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `provider_oauth_token` text;

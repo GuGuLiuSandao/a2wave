@@ -1,0 +1,159 @@
+# a2wave CI — lint / typecheck / unit-test gates.
+#
+# Pipeline overview:
+# - lint / typecheck / test / test-api run on push to main and on pull requests.
+# - Playwright E2E is intentionally NOT in CI: it needs web+api running together,
+#   and still runs locally via `pnpm test:all`.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: these jobs only read the checkout. Declared explicitly so the
+# gates keep a read-only token even if the repository default is ever widened —
+# `pull_request` runs from forks, so this is the workflow untrusted code reaches.
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm lint
+      - run: node --test scripts/gates/__tests__/check-docker-context.test.mjs
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # The shared package exports dist/index.d.ts; api/web/cli need dist to exist
+      # before `tsc --noEmit` can resolve @a2wave/shared.
+      - run: pnpm --filter @a2wave/shared build
+      - run: pnpm typecheck
+
+  # Unit-test gate: shared / cli / web must all be green; a red test blocks the pipeline.
+  # apps/api runs separately in test-api (real SQLite, needs the build toolchain).
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # scripts/deploy tests re-run the remote docker commands under dash to prove
+      # they don't rely on bash extensions and parse correctly under POSIX sh.
+      - name: Install dash
+        run: sudo apt-get update && sudo apt-get install -y dash
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # cli/web tests import @a2wave/shared types and runtime values — dist must exist first.
+      - run: pnpm --filter @a2wave/shared build
+      - run: pnpm --filter @a2wave/shared test
+      - run: pnpm --filter a2wave test
+      - run: pnpm --filter @a2wave/web test
+      # These node --test groups are part of the root `pnpm test`, but the steps above
+      # run per-package and would not pick them up — skipping them would mean the
+      # scripts/ tests never run in CI.
+      - run: pnpm provider-clis:test
+      - run: node --test scripts/deploy/__tests__/deploy-remote.test.mjs
+      # The api gate's own regression tests — they guard the "a suite that fails to
+      # load reports zero failing assertions" hole, which is invisible to the gate
+      # it protects. Cheap (synthetic reports, no real suite run), so keep them in
+      # the fast blocking job rather than behind the api build toolchain.
+      - run: node --test scripts/gates/__tests__/check-api-tests.test.mjs
+      # Pure helpers of the minVersion verifier. The verifier itself installs real
+      # CLIs from npm and is deliberately NOT run here; these tests inject the
+      # exec boundary, so they neither hit the network nor spawn a CLI.
+      - run: node --test scripts/__tests__/verify-provider-min-versions.test.mjs
+      # AUTH_SECRET generation for `pnpm dev` and for the container entrypoint. Both are
+      # first-run onboarding paths, so a regression here breaks the documented quickstart
+      # rather than a feature — exactly the failure nobody notices until a new user hits it.
+      - run: node --test scripts/__tests__/ensure-auth-secret.test.mjs
+      - run: node --test scripts/__tests__/container-auth-secret.test.mjs
+      # Pure helpers of the license-inventory gate (rendering, drift diffing, forbidden-license
+      # detection). No pnpm store access — the store-dependent half runs in `license-inventory`.
+      - run: node --test scripts/gates/__tests__/check-license-inventory.test.mjs
+      # Guards .gitleaks.toml against the silent failure where an allowlist loses its
+      # `condition = "AND"` and starts suppressing an entire file instead of one placeholder.
+      # Pure text assertions — no gitleaks binary needed, unlike the `secret-scan` job.
+      - run: node --test scripts/gates/__tests__/gitleaks-config.test.mjs
+
+  # Full-history secret scan. Must stay at zero findings: the allowlists in .gitleaks.toml are
+  # scoped to specific placeholder strings, so anything reported here is genuinely new.
+  # fetch-depth: 0 because a shallow clone would scan only the tip commit.
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          GITLEAKS_ENABLE_SUMMARY: "true"
+
+  # Compliance gate: docs/dependency-license-inventory.md must still match the installed tree,
+  # and no GPL/AGPL/LGPL/SSPL or unknown-licensed dependency may enter it. Kept out of `lint`
+  # because `pnpm licenses list` reads the pnpm store, which needs a real (non --ignore-scripts
+  # is fine, but populated) install rather than just a resolved lockfile.
+  license-inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm licenses:check
+
+  # apps/api unit tests — blocking, but compared against baselines via
+  # scripts/gates/check-api-tests.mjs: only failures NOT in the baseline turn the
+  # pipeline red. Baseline entries shrink, never grow.
+  #
+  # NOTE: this job must NOT use --ignore-scripts. The api tests hit a real SQLite,
+  # and better-sqlite3 may need to build its native addon from source via node-gyp
+  # when no prebuilt binary matches — which needs python3 + a C++ toolchain
+  # (preinstalled on ubuntu runners). Skipping install scripts would make every
+  # test fail with "native addon is missing" — an environment problem, not a
+  # regression signal.
+  test-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @a2wave/shared build
+      - run: node scripts/gates/check-api-tests.mjs

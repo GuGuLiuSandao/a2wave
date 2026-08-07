@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `schedule_config` text;

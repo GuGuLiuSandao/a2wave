@@ -1,0 +1,128 @@
+# a2wave CLI publish — triggered by pushing a v* tag.
+#
+# The platform and the CLI share one version line, so the same `v*` tag that
+# cuts a Release and builds the Docker image also publishes the CLI to npm.
+# There is no separate `cli-v*` tag.
+#
+# Publishes to the public npm registry with provenance. The gates below
+# (typecheck / test / pack-contents validation) run before publish because
+# `npm publish` is irreversible: a bad version cannot be replaced, only
+# deprecated.
+#
+# Required secret: NPM_TOKEN (an npm automation token with publish rights).
+
+name: CLI Publish
+
+on:
+  push:
+    tags:
+      # Anchored shape, not a bare `v*` glob: a typo like `vfoo` should not
+      # reach a publish step at all.
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: write # create the GitHub Release for the v* tag
+  id-token: write # required for npm publish --provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 — release notes diff against the previous v* tag.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      # Fail fast and legibly. Without this the run dies much later on an
+      # ENEEDAUTH from npm, which reads as an auth problem rather than a
+      # missing repository secret.
+      - name: Check publish credentials
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NPM_TOKEN}" ]; then
+            echo "::error::NPM_TOKEN repository secret is not configured"
+            exit 1
+          fi
+
+      # The git tag is the only thing a maintainer types; package.json is what
+      # npm actually publishes. If they disagree, npm silently ships the wrong
+      # version under a tag that claims otherwise — and it cannot be replaced.
+      # The root version is checked too: one tag now speaks for both, so a tag
+      # matching only the CLI would ship a Release naming a version the
+      # platform never had.
+      - name: Verify tag matches package versions
+        run: |
+          CLI_VERSION="$(node -p "require('./apps/cli/package.json').version")"
+          ROOT_VERSION="$(node -p "require('./package.json').version")"
+          if [ "${CLI_VERSION}" != "${ROOT_VERSION}" ]; then
+            echo "::error::apps/cli version ${CLI_VERSION} does not match root version ${ROOT_VERSION}; they share one version line"
+            exit 1
+          fi
+          if [ "${GITHUB_REF_NAME}" != "v${CLI_VERSION}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package.json version ${CLI_VERSION} (expected v${CLI_VERSION})"
+            exit 1
+          fi
+
+      - run: pnpm install --frozen-lockfile --filter "a2wave..." --ignore-scripts
+
+      - name: Typecheck
+        run: pnpm --filter a2wave typecheck
+
+      - name: Test
+        run: pnpm --filter a2wave test
+
+      - run: pnpm --filter a2wave build
+
+      # The `files` field should limit the tarball to the runtime bundle and its
+      # public documentation/legal notices. Verify it actually does rather than
+      # trusting it — a missing notice or stray source file cannot be fixed in
+      # an already-published npm version.
+      - name: Validate package contents
+        working-directory: apps/cli
+        run: |
+          FILES=$(npm pack --dry-run --json | node -e '
+            const chunks = []
+            process.stdin.on("data", (c) => chunks.push(c))
+            process.stdin.on("end", () => {
+              const parsed = JSON.parse(chunks.join(""))
+              for (const entry of parsed[0].files) console.log(entry.path)
+            })
+          ')
+          echo "$FILES"
+          # Positive assertion first: `bin` points at dist/index.cjs, so if the
+          # build output is ever renamed the `a2wave` command becomes a
+          # dangling symlink on every install.
+          if ! echo "$FILES" | grep -qx 'dist/index.cjs'; then
+            echo "::error::package tarball is missing dist/index.cjs (the bin entry)"
+            exit 1
+          fi
+          for required in README.md LICENSE NOTICE package.json; do
+            if ! echo "$FILES" | grep -qx "$required"; then
+              echo "::error::package tarball is missing $required"
+              exit 1
+            fi
+          done
+          # Match anywhere in the path, not just the tarball root, so a nested
+          # dist/src/… cannot slip through.
+          if echo "$FILES" | grep -qE '(^|/)(src|scripts|coverage|__tests__)/|\.(test|spec)\.[cm]?[jt]sx?$'; then
+            echo "::error::package tarball contains non-runtime files"
+            exit 1
+          fi
+
+      - name: Publish to npm
+        working-directory: apps/cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public

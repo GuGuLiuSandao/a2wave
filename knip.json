@@ -1,0 +1,32 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/**/*.mjs", "e2e/**/*.ts"],
+      "project": ["scripts/**/*.mjs", "e2e/**/*.ts"]
+    },
+    "apps/api": {
+      "entry": [
+        "src/mcp-servers/*.ts",
+        "src/scripts/*.ts",
+        "scripts/*.ts",
+        "src/**/__tests__/**/*.ts",
+        "src/test/**/*.ts"
+      ],
+      "project": ["src/**/*.ts"]
+    },
+    "apps/web": {
+      "entry": ["index.html", "src/**/__tests__/**/*.{ts,tsx}", "src/test/**/*.{ts,tsx}"],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "apps/cli": {
+      "entry": ["src/**/__tests__/**/*.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/shared": {
+      "entry": ["src/**/__tests__/**/*.ts"],
+      "project": ["src/**/*.ts"]
+    }
+  },
+  "ignoreDependencies": ["pino-roll", "pino-pretty", "@types/adm-zip", "tailwindcss", "tsup", "zod"]
+}

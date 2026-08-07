@@ -1,0 +1,62 @@
+# Gitleaks configuration for a2wave.
+#
+# Goal: a full-history scan must exit 0, so a genuine leak is a signal rather than noise buried
+# under standing false positives.
+#
+# Each allowlist below uses `condition = "AND"`, which requires the path AND the placeholder
+# regex to match before a finding is suppressed. This matters: with the default OR condition,
+# naming a path suppresses *everything* in that file forever, so a real key later committed to
+# the same test file would go unreported. The AND form keeps these files scanned — only the one
+# known placeholder string is excused.
+#
+# Deliberately NOT used here:
+#   - commit-pinned fingerprints: they silently stop applying after any history rewrite, turning
+#     a rewrite into a batch of surprise failures;
+#   - bare path excludes / .gitleaksignore: blinds the scanner to those files permanently.
+#
+# The `regex`/`keywords` on each rule below are copied verbatim from the gitleaks v8 defaults
+# (`useDefault = true` loads them; redefining an id overrides that entry wholesale, so the
+# pattern must be restated to attach a rule-scoped allowlist).
+#
+# Verify with:  gitleaks detect --source . --redact --no-banner
+# Regression-tested by: scripts/gates/__tests__/gitleaks-config.test.mjs
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+description = "Generic API Key"
+regex = '''(?i)(?:key|api|token|secret|client|passwd|password|auth|access)(?:[0-9a-z\-_\t .]{0,20})(?:[\s|']|[\s|"]){0,3}(?:=|>|:{1,3}=|\|\||:|<=|=>|:=|\?=|,)(?:'|\"|\s|=|\x60){0,5}([0-9a-z\-_.=]{10,150})(?:['|\"|\n|\r|\s|\x60|;|\\]|$)'''
+keywords = ["key", "api", "token", "secret", "client", "passwd", "password", "auth", "access"]
+entropy = 3.5
+
+# apps/api/.../auth-oidc.test.ts — a vi.mock() stub for env.AUTH_SECRET. The string names itself
+# as a test fixture and is never read outside the mocked module.
+[[rules.allowlists]]
+condition = "AND"
+regexTarget = "match"
+paths = ['''apps/api/src/routes/__tests__/auth-oidc\.test\.ts''']
+regexes = ['''test-secret-with-sufficient-entropy-for-tests''']
+
+# apps/cli/.../config.test.ts — asserts the CLI masks a stored token to its last 4 characters.
+# The value must look JWT-ish for the assertion to mean anything, but decodes to nothing.
+[[rules.allowlists]]
+condition = "AND"
+regexTarget = "match"
+paths = ['''apps/cli/src/commands/__tests__/config\.test\.ts''']
+regexes = ['''eyJabcdefghijk1234''']
+
+[[rules]]
+id = "curl-auth-header"
+description = "Discovered a potential authorization token provided in a curl command header"
+regex = '''(?i)\bcurl\b(?:.*|[\r\n]{0,5})(?:-H|--header)(?:=|\s+)(?:"|')?(?:Authorization:\s*)(?:Bearer|Token|Basic)\s+([\w=~@.+/-]{8,})'''
+keywords = ["curl"]
+
+# docs/a2a-demo.md — quickstart placeholders. Uppercase, self-describing, and not a valid key in
+# any format a2wave accepts; a reader must substitute their own.
+[[rules.allowlists]]
+condition = "AND"
+regexTarget = "match"
+paths = ['''docs/a2a-demo\.md''']
+regexes = ['''Bearer\s+YOUR_API_KEY''']

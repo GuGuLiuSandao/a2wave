@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `max_concurrency` integer DEFAULT 1 NOT NULL;

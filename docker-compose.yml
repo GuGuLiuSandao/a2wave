@@ -1,0 +1,174 @@
+services:
+  a2wave:
+    image: a2wave:${IMAGE_TAG:-latest}
+    build: .
+    # Wait for PostgreSQL to pass its healthcheck before booting. Migrations run at
+    # startup and exit(1) on failure, so without this a cold start races initdb and the
+    # first thing an operator sees is a migration failure — which reads like a
+    # misconfiguration rather than a timing issue. `restart` recovers it, but only
+    # after a crash loop.
+    #
+    # `required: false` is what keeps the default single-container `up` working: the
+    # postgres service is profile-gated, and Compose rejects the whole project with
+    # "depends on undefined service" when a required dependency is excluded by profile.
+    # Marked optional, the dependency is dropped when the profile is off and still
+    # enforced (condition included) when `--profile postgres` is active.
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    ports:
+      # Host port only. The container side stays 3502 because the image's EXPOSE,
+      # PORT default and HEALTHCHECK all hardcode it — remapping the container port
+      # here would leave the healthcheck probing a closed port and mark the service
+      # unhealthy. Set A2WAVE_HOST_PORT to publish on a different host port.
+      - "${A2WAVE_HOST_PORT:-3502}:3502"
+    volumes:
+      - a2wave-data:/app/data
+      # Host path for the SCM workspace: Linux servers default to /data/workspace.
+      # On macOS /data is not in the Docker Desktop File Sharing allowlist, so override
+      # A2WAVE_WORKSPACE_DIR to point at a directory under /Users. The in-container path never changes.
+      - ${A2WAVE_WORKSPACE_DIR:-/data/workspace}:/data/workspace
+      # Every Provider reads localSession state from the service HOME. Persist the full directory
+      # to cover Cursor, Codex, OpenCode, Qoder, Trae, Copilot, Kimi, Pi, and future Provider CLIs.
+      - a2wave-cli-home:/home/appuser
+      # Claude Code localSession credentials: by default this maps the ~/.claude of the OS user
+      # running docker compose (zero-config if that user has already run `claude /login`).
+      # When docker is started via sudo / systemd, override A2WAVE_CLAUDE_LOGIN_DIR to point at a
+      # directory that actually holds a login.
+      # Mounted :ro because probe / agent execution only read .credentials.json; token refresh
+      # happens on the host side (only a host-run claude writes it back), so the container never
+      # needs write access. This shrinks the attack surface for accidental credential changes.
+      - ${A2WAVE_CLAUDE_LOGIN_DIR:-${HOME}/.claude}:/home/appuser/.claude:ro
+    environment:
+      - NODE_ENV=production
+      - PORT=3502
+      # SQLite by default (single container + volume, no external dependency).
+      # PostgreSQL >= 9.6 is EXPERIMENTAL — not yet recommended for production,
+      # and there is NO SQLite -> PostgreSQL data migration path. To try it:
+      #   docker compose --profile postgres up -d
+      #   DATABASE_URL=postgres://a2wave:a2wave@postgres:5432/a2wave
+      # The scheme alone selects the backend; there is no separate driver switch.
+      - DATABASE_URL=${DATABASE_URL:-/app/data/a2wave.db}
+      - DATABASE_POOL_MAX=${DATABASE_POOL_MAX:-10}
+      - A2WAVE_SKILLS_STORAGE=/app/data/skills
+      # Runtime install root for Provider CLIs. Left empty, the image default
+      # /home/appuser/.a2wave applies (already on PATH). Point it at a different mounted volume
+      # and the process adds that directory to PATH at startup.
+      - A2WAVE_CLI_INSTALL_ROOT=${A2WAVE_CLI_INSTALL_ROOT:-/home/appuser/.a2wave}
+      # Pi shares deployment credentials/config while a2wave isolates each Agent's runtime HOME.
+      # The default lives in the persisted service HOME; override only with another container path.
+      - PI_CODING_AGENT_DIR=${PI_CODING_AGENT_DIR:-}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3501}
+      - TRUSTED_PROXY=${TRUSTED_PROXY:-false}
+      - TRUSTED_PROXY_ADDRESSES=${TRUSTED_PROXY_ADDRESSES:-}
+      # The externally reachable origin of this instance. Left empty, gateway signing falls back to
+      # an opaque issuer plus hand-delivered JWKS; setting it enables the discovery endpoint and the
+      # per-gateway configuration snippets.
+      - PUBLIC_URL=${PUBLIC_URL:-}
+      # Left empty, the entrypoint generates one on first boot and persists it in the data
+      # volume (see scripts/ensure-container-auth-secret.sh), so the quickstart runs as
+      # documented. Set it explicitly to control the value — an explicit secret always wins
+      # and is never overwritten by the generated fallback.
+      - AUTH_SECRET=${AUTH_SECRET:-}
+      - AUTH_SESSION_TTL_DAYS=${AUTH_SESSION_TTL_DAYS:-1}
+      # Pin the runtime UID/GID explicitly, skipping the entrypoint's adaptive mount probe.
+      # macOS Docker Desktop (VirtioFS) reports bind mounts as root:root, so the probe would
+      # detect UID 0 and refuse to start → on a Mac these must be set to 10001:10001.
+      - A2WAVE_RUN_AS_UID=${A2WAVE_RUN_AS_UID:-}
+      - A2WAVE_RUN_AS_GID=${A2WAVE_RUN_AS_GID:-}
+      - CURSOR_AGENT_WORK_DIR=/app/data/workspaces
+      # Optional admin password, applied on first boot only. Left empty, the first person to
+      # reach the setup page claims the admin account — there is no token guarding it. Set this
+      # to initialize the admin during boot and close that window entirely.
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      # P4 code source
+      - SCM_P4_PORT=${SCM_P4_PORT:-}
+      - SCM_P4_USER=${SCM_P4_USER:-}
+      - SCM_P4_PASSWD=${SCM_P4_PASSWD:-}
+      - SCM_P4_CLIENT=${SCM_P4_CLIENT:-}
+      - SCM_P4_DEPOT_PATH=${SCM_P4_DEPOT_PATH:-}
+      - SCM_P4_LOCAL_PATH=${SCM_P4_LOCAL_PATH:-/data/workspace/main}
+      - SCM_P4_AUTO_SYNC=${SCM_P4_AUTO_SYNC:-true}
+      # Git code source
+      - SCM_GIT_REPO_URL=${SCM_GIT_REPO_URL:-}
+      - SCM_GIT_BRANCH=${SCM_GIT_BRANCH:-main}
+      - SCM_GIT_USERNAME=${SCM_GIT_USERNAME:-}
+      - SCM_GIT_PAT=${SCM_GIT_PAT:-}
+      - SCM_GIT_LOCAL_PATH=${SCM_GIT_LOCAL_PATH:-/app/data/git-workspace}
+      - SCM_GIT_AUTO_SYNC=${SCM_GIT_AUTO_SYNC:-true}
+      # Custom per-source workspacesPath values must stay under an operator-approved root.
+      # /data/workspace is the dedicated bind mount declared above.
+      - SCM_WORKSPACES_ALLOWED_ROOTS=${SCM_WORKSPACES_ALLOWED_ROOTS:-/data/workspace}
+      # Settings overrides
+      - SETTINGS_GENERAL_WORKSPACE_PATH=${SETTINGS_GENERAL_WORKSPACE_PATH:-}
+      - SETTINGS_GENERAL_TIMEOUT_MINUTES=${SETTINGS_GENERAL_TIMEOUT_MINUTES:-}
+      - SETTINGS_BRANDING_SUBTITLE=${SETTINGS_BRANDING_SUBTITLE:-}
+      - SETTINGS_BRANDING_FAVICON_URL=${SETTINGS_BRANDING_FAVICON_URL:-}
+      # Import SSRF allowlist (exact private-DNS hostnames; cloud metadata remains hard-blocked)
+      - TRUSTED_IMPORT_HOSTS=${TRUSTED_IMPORT_HOSTS:-}
+      # Provider model-probe allowlist (exact private-DNS hostnames; metadata remains hard-blocked)
+      - TRUSTED_PROVIDER_HOSTS=${TRUSTED_PROVIDER_HOSTS:-}
+      # Remote MCP allowlist and A2A strict-mode exceptions (exact private-DNS hostnames)
+      - TRUSTED_MCP_HOSTS=${TRUSTED_MCP_HOSTS:-}
+      - TRUSTED_A2A_ROUTE_HOSTS=${TRUSTED_A2A_ROUTE_HOSTS:-}
+      # Remote A2A allows ordinary enterprise-private targets unless explicitly set false
+      - ALLOW_PRIVATE_ROUTE_TARGETS=${ALLOW_PRIVATE_ROUTE_TARGETS:-true}
+      # Enterprise OIDC: backend SSO login + the Agent OAuth publish channel's token
+      # verification. See docs/agent/oauth-channel.md. The settings page takes precedence
+      # over these when configured.
+      - A2WAVE_OIDC_ISSUER=${A2WAVE_OIDC_ISSUER:-}
+      - A2WAVE_OIDC_CLIENT_ID=${A2WAVE_OIDC_CLIENT_ID:-}
+      - A2WAVE_OIDC_CLIENT_SECRET=${A2WAVE_OIDC_CLIENT_SECRET:-}
+      - A2WAVE_OIDC_SCOPES=${A2WAVE_OIDC_SCOPES:-}
+      # Audiences accepted on the OAuth channel (comma-separated). CLIENT_ID is NOT implicit;
+      # empty disables the channel (fail closed). Does not affect OIDC login.
+      - A2WAVE_OIDC_CHANNEL_AUDIENCES=${A2WAVE_OIDC_CHANNEL_AUDIENCES:-}
+      # SAML 2.0 (a2wave acts as the SP)
+      - A2WAVE_SAML_IDP_ENTRY_POINT=${A2WAVE_SAML_IDP_ENTRY_POINT:-}
+      - A2WAVE_SAML_IDP_CERT=${A2WAVE_SAML_IDP_CERT:-}
+      - A2WAVE_SAML_SP_ENTITY_ID=${A2WAVE_SAML_SP_ENTITY_ID:-}
+      # Outbound proxy: only pass through vars the host has set; do not inject empty values that override image config
+      - HTTPS_PROXY
+      - HTTP_PROXY
+      - https_proxy
+      - http_proxy
+    restart: unless-stopped
+
+  # Optional PostgreSQL backend — EXPERIMENTAL, see docs/agent/postgresql.md.
+  # Not yet recommended for production: no production soak time, and no
+  # SQLite -> PostgreSQL data migration path (you start from an empty database).
+  #
+  # Behind a compose profile so the default `docker compose up` stays a single
+  # container with no external dependency (Iron Rule 7). Enable with
+  # `docker compose --profile postgres up -d` and set
+  # DATABASE_URL=postgres://a2wave:a2wave@postgres:5432/a2wave.
+  #
+  # Pinned to 16 (current stable) rather than the 9.6 support floor: 9.6 is the
+  # OLDEST server a2wave runs against, for operators stuck on a legacy instance,
+  # not the version a new deployment should choose.
+  postgres:
+    image: postgres:${POSTGRES_VERSION:-16-alpine}
+    profiles: ["postgres"]
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-a2wave}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-a2wave}
+      - POSTGRES_DB=${POSTGRES_DB:-a2wave}
+    volumes:
+      - a2wave-postgres:/var/lib/postgresql/data
+    # Not published by default: the API reaches it over the compose network, and
+    # binding 5432 on the host would expose the database with its default
+    # password to anything that can reach the machine.
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-a2wave} -d ${POSTGRES_DB:-a2wave}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  a2wave-data:
+  a2wave-cli-home:
+  a2wave-postgres:

@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `oauth_access_mode` text DEFAULT 'feishu_scope' NOT NULL;

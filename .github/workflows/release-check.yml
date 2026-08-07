@@ -1,0 +1,53 @@
+# Release reminder — warns when main has drifted away from the last release.
+#
+# Advisory only: this workflow never blocks a merge. It exists so an unreleased
+# backlog on main is visible in the Actions tab instead of going unnoticed.
+# Release flow itself is documented in the release-workflow skill.
+
+name: Release Check
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_THRESHOLD_COMMITS: '10'
+
+jobs:
+  release-check:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 — git describe needs the full tag history.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Warn when a release is overdue
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 --match='v*' 2>/dev/null || echo "")
+          WARN=0
+
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No v* tag found yet; skipping the commit-backlog check."
+          else
+            AHEAD=$(git rev-list --count "${LATEST_TAG}..HEAD")
+            echo "latest tag = ${LATEST_TAG}"
+            echo "ahead      = ${AHEAD} commits"
+            if [ "${AHEAD}" -ge "${RELEASE_THRESHOLD_COMMITS}" ]; then
+              echo "::warning::main is ${AHEAD} commits past ${LATEST_TAG} (threshold ${RELEASE_THRESHOLD_COMMITS}). Cut a release: update CHANGELOG -> commit -> tag -> push."
+              WARN=1
+            fi
+          fi
+
+          if grep -q "^## Unreleased" CHANGELOG.md; then
+            echo "::warning::CHANGELOG.md still has an '## Unreleased' section that has not been cut into a version."
+            WARN=1
+          fi
+
+          if [ "${WARN}" -eq 0 ]; then
+            echo "Release state looks current."
+          fi

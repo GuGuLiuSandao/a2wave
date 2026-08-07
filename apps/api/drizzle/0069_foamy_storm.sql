@@ -1,0 +1,1 @@
+ALTER TABLE `feishu_card_callbacks` ADD `trigger_open_id` text;

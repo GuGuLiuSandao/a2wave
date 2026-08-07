@@ -1,0 +1,1 @@
+ALTER TABLE `scm_sources` ADD `initial_sync_completed_at` integer;

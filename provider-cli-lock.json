@@ -1,0 +1,150 @@
+{
+  "$schema": "./scripts/provider-clis/provider-cli-lock.schema.json",
+  "schemaVersion": 2,
+  "providers": [
+    {
+      "kind": "cursor",
+      "version": "2026.07.16-899851b",
+      "binary": "cursor-agent",
+      "versionArgs": ["--version"],
+      "expectedVersionOutput": "2026.07.16-899851b",
+      "install": {
+        "type": "archive",
+        "stripComponents": 1,
+        "binaryPath": "cursor-agent",
+        "targets": {
+          "linux-amd64": {
+            "url": "https://downloads.cursor.com/lab/2026.07.16-899851b/linux/x64/agent-cli-package.tar.gz",
+            "sha256": "106acf6b3a3781cd279038726abc4f79f987449b9f5219b0f6e62d96c88fee6d"
+          },
+          "linux-arm64": {
+            "url": "https://downloads.cursor.com/lab/2026.07.16-899851b/linux/arm64/agent-cli-package.tar.gz",
+            "sha256": "8ee8caf3f54aca6c73b68c13c0d64bdb989b1a65dfb6574414d9b030d0d10918"
+          }
+        }
+      }
+    },
+    {
+      "kind": "claude-code",
+      "version": "2.1.212",
+      "binary": "claude",
+      "versionArgs": ["--version"],
+      "expectedVersionOutput": "2.1.212",
+      "install": {
+        "type": "npm",
+        "package": "@anthropic-ai/claude-code",
+        "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.212.tgz",
+        "integrity": "sha512-MEasj1oaoARRKEWU7eHJ6DWC2TC8ogml9QUDihbmxYI2Ij5Ol1leW90DIj8/a0xX3lfHZOwT3gJr0JxVKa8Sxw==",
+        "allowScripts": true
+      }
+    },
+    {
+      "kind": "codex",
+      "version": "0.144.5",
+      "binary": "codex",
+      "versionArgs": ["--version"],
+      "expectedVersionOutput": "0.144.5",
+      "install": {
+        "type": "npm",
+        "package": "@openai/codex",
+        "tarball": "https://registry.npmjs.org/@openai/codex/-/codex-0.144.5.tgz",
+        "integrity": "sha512-jjB+K+OMv572mKhS+2QuLxWXDJNdpwbPenf+V+8bdq7wg4Scqt3cn6WEekD8wPqDVZqck0HSX17K9rD9kbDJQA==",
+        "allowScripts": false
+      }
+    },
+    {
+      "kind": "opencode",
+      "version": "1.18.3",
+      "binary": "opencode",
+      "versionArgs": ["--version"],
+      "expectedVersionOutput": "1.18.3",
+      "install": {
+        "type": "npm",
+        "package": "opencode-ai",
+        "tarball": "https://registry.npmjs.org/opencode-ai/-/opencode-ai-1.18.3.tgz",
+        "integrity": "sha512-HnItl/+uhSpj7JV9x6ITiE0XFq4b/PKF5OM03TIyiFoFiLw3MQoJOAXZFTEzC7IOgAIYcysRQBBmCmlXILkxww==",
+        "allowScripts": true
+      }
+    },
+    {
+      "kind": "qoder",
+      "version": "1.0.48",
+      "binary": "qodercli",
+      "versionArgs": ["--version"],
+      "expectedVersionOutput": "1.0.48",
+      "install": {
+        "type": "npm",
+        "package": "@qoder-ai/qodercli",
+        "tarball": "https://registry.npmjs.org/@qoder-ai/qodercli/-/qodercli-1.0.48.tgz",
+        "integrity": "sha512-T5Dy/5gVNHdrsCpMc/bngnka78tW5FlbRnX5t4rL5P5wVX1Qs43qobdENueXyPGxlDkPtapqWQ+1/btG62No6w==",
+        "allowScripts": true
+      }
+    },
+    {
+      "kind": "trae",
+      "version": "0.120.42",
+      "binary": "traecli",
+      "versionArgs": ["--version"],
+      "expectedVersionOutput": "0.120.42",
+      "install": {
+        "type": "archive",
+        "stripComponents": 0,
+        "binaryPath": "trae-cli",
+        "targets": {
+          "linux-amd64": {
+            "url": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/trae-cli/trae-cli_0.120.42_linux_amd64.tar.gz",
+            "sha256": "81bdfe407907bdd9d088e6cdd249ef886110f5c6232a693f0aa399d89bb4c3e8"
+          },
+          "linux-arm64": {
+            "url": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/trae-cli/trae-cli_0.120.42_linux_arm64.tar.gz",
+            "sha256": "d6371667ce739cd57f272d19cc77186a7961331ad8a7ef97a3afb5f9eb6a83a8"
+          }
+        }
+      }
+    },
+    {
+      "kind": "kimi",
+      "version": "0.30.0",
+      "binary": "kimi",
+      "versionArgs": ["--version"],
+      "expectedVersionOutput": "0.30.0",
+      "install": {
+        "type": "npm",
+        "package": "@moonshot-ai/kimi-code",
+        "tarball": "https://registry.npmjs.org/@moonshot-ai/kimi-code/-/kimi-code-0.30.0.tgz",
+        "integrity": "sha512-YhUXhduLxfdEFLtetQpkDIRYs290MlF7QuoH2XQJb6g6pEtYkr1jzam1kUUAqm58kQfetxw781u4qude3k2qPg==",
+        "allowScripts": false
+      }
+    },
+    {
+      "kind": "pi",
+      "version": "0.83.0",
+      "binary": "pi",
+      "versionArgs": ["--version"],
+      "expectedVersionOutput": "0.83.0",
+      "install": {
+        "type": "npm",
+        "package": "@earendil-works/pi-coding-agent",
+        "tarball": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.83.0.tgz",
+        "integrity": "sha512-uYhF+FsZxogoSX/AxBcUdiY+ZklubwaXyAoEGA2eQwsHcyEAhUYIKh/WLXe/a8+k8eTCmxb+ZN2Zo9mzQtzbWw==",
+        "allowScripts": false
+      }
+    }
+  ],
+  "tools": [
+    {
+      "kind": "codegraph",
+      "version": "1.1.0",
+      "binary": "codegraph",
+      "versionArgs": ["--version"],
+      "expectedVersionOutput": "1.1.0",
+      "install": {
+        "type": "npm",
+        "package": "@colbymchenry/codegraph",
+        "tarball": "https://registry.npmjs.org/@colbymchenry/codegraph/-/codegraph-1.1.0.tgz",
+        "integrity": "sha512-JFzNLf+EPh7wpH0Ly1z0BU1LwHVXzYFGTTPGVhhYQ0vwR0u+s2swUqJIhTVByE9hmLZBpaYF1BQIbjBTl70WsQ==",
+        "allowScripts": false
+      }
+    }
+  ]
+}

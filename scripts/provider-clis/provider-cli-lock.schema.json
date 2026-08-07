@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://a2wave.local/schemas/provider-cli-lock.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "providers"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": 2
+    },
+    "providers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "version",
+          "binary",
+          "versionArgs",
+          "expectedVersionOutput",
+          "install"
+        ],
+        "properties": {
+          "kind": {
+            "enum": ["cursor", "claude-code", "codex", "opencode", "qoder", "trae", "kimi", "pi"]
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "binary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "versionArgs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expectedVersionOutput": {
+            "type": "string",
+            "minLength": 1
+          },
+          "install": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["type", "package", "tarball", "integrity", "allowScripts"],
+                "properties": {
+                  "type": {
+                    "const": "npm"
+                  },
+                  "package": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "tarball": {
+                    "type": "string",
+                    "pattern": "^https://registry\\.npmjs\\.org/"
+                  },
+                  "integrity": {
+                    "type": "string",
+                    "pattern": "^sha512-[A-Za-z0-9+/]+={0,2}$"
+                  },
+                  "allowScripts": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["type", "stripComponents", "binaryPath", "targets"],
+                "properties": {
+                  "type": {
+                    "const": "archive"
+                  },
+                  "stripComponents": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "binaryPath": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "targets": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["url", "sha256"],
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri",
+                          "pattern": "^https://"
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "version",
+          "binary",
+          "versionArgs",
+          "expectedVersionOutput",
+          "install"
+        ],
+        "properties": {
+          "kind": {
+            "enum": ["codegraph"]
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "binary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "versionArgs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expectedVersionOutput": {
+            "type": "string",
+            "minLength": 1
+          },
+          "install": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["type", "package", "tarball", "integrity", "allowScripts"],
+                "properties": {
+                  "type": {
+                    "const": "npm"
+                  },
+                  "package": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "tarball": {
+                    "type": "string",
+                    "pattern": "^https://registry\\.npmjs\\.org/"
+                  },
+                  "integrity": {
+                    "type": "string",
+                    "pattern": "^sha512-[A-Za-z0-9+/]+={0,2}$"
+                  },
+                  "allowScripts": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["type", "stripComponents", "binaryPath", "targets"],
+                "properties": {
+                  "type": {
+                    "const": "archive"
+                  },
+                  "stripComponents": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "binaryPath": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "targets": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["url", "sha256"],
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri",
+                          "pattern": "^https://"
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

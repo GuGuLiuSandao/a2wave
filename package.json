@@ -1,0 +1,87 @@
+{
+  "name": "a2wave",
+  "version": "0.7.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "stop": "node scripts/stop.mjs",
+    "dev:shared": "pnpm --filter @a2wave/shared dev",
+    "dev:api": "pnpm --filter @a2wave/api dev",
+    "dev:web": "pnpm --filter @a2wave/web dev",
+    "build": "pnpm --filter @a2wave/shared build && pnpm --filter @a2wave/api build && pnpm --filter @a2wave/web build && pnpm --filter a2wave build",
+    "build:api": "pnpm --filter @a2wave/shared build && pnpm --filter @a2wave/api build",
+    "build:web": "pnpm --filter @a2wave/shared build && pnpm --filter @a2wave/web build",
+    "provider-clis:check": "node scripts/provider-clis/install.mjs --check",
+    "provider-clis:test": "node --test scripts/provider-clis/__tests__/install.test.mjs",
+    "provider-min-versions:verify": "node scripts/verify-provider-min-versions.mjs",
+    "licenses:check": "node scripts/gates/check-license-inventory.mjs",
+    "licenses:write": "node scripts/gates/check-license-inventory.mjs --write",
+    "db:generate": "pnpm --filter @a2wave/shared build && pnpm --filter @a2wave/api db:generate",
+    "db:migrate": "pnpm --filter @a2wave/shared build && pnpm --filter @a2wave/api db:migrate",
+    "knip": "knip",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "pnpm --filter @a2wave/shared build && pnpm -r typecheck",
+    "a2a-demo": "pnpm --filter @a2wave/api a2a-demo",
+    "reset-admin": "pnpm --filter @a2wave/api reset-admin",
+    "set-admin-password": "pnpm --filter @a2wave/api set-admin-password",
+    "test": "pnpm --filter @a2wave/shared build && pnpm -r --filter './apps/*' --filter './packages/*' test && pnpm provider-clis:test && node --test scripts/deploy/__tests__/deploy-remote.test.mjs scripts/gates/__tests__/check-api-tests.test.mjs scripts/__tests__/verify-provider-min-versions.test.mjs scripts/__tests__/ensure-auth-secret.test.mjs scripts/__tests__/container-auth-secret.test.mjs scripts/gates/__tests__/check-license-inventory.test.mjs scripts/gates/__tests__/gitleaks-config.test.mjs",
+    "test:watch": "pnpm -r --parallel --filter './apps/*' test:watch",
+    "test:coverage": "pnpm --filter @a2wave/shared build && pnpm -r --filter './apps/*' test:coverage",
+    "test:all": "pnpm test && playwright test",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:recovery": "bash scripts/e2e/restart-recovery.sh",
+    "test:e2e:onboarding": "bash scripts/e2e/onboarding.sh",
+    "prepare": "husky || true"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,mjs,cjs,json,jsonc}": [
+      "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true"
+    ]
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@9.15.4",
+  "pnpm": {
+    "overrides": {
+      "protobufjs@<7.6.5": ">=7.6.5 <8",
+      "axios@<1.18.0": ">=1.18.0 <2",
+      "hono@<4.12.34": ">=4.12.34 <5",
+      "@hono/node-server@<2.0.5": ">=2.0.5 <3",
+      "body-parser@>=2.0.0 <2.3.0": ">=2.3.0 <3",
+      "shell-quote@<=1.8.3": ">=1.8.4 <2",
+      "form-data@<4.0.6": ">=4.0.6 <5",
+      "express-rate-limit@<8.2.2": ">=8.2.2",
+      "rollup@<4.59.0": ">=4.59.0",
+      "picomatch@>=4.0.0 <4.0.4": ">=4.0.4",
+      "path-to-regexp@>=8.0.0 <8.4.0": ">=8.4.0",
+      "lodash-es@<4.18.0": ">=4.18.0",
+      "vite@>=6.0.0 <6.4.2": ">=6.4.2 <7",
+      "fast-uri@<3.1.5": ">=3.1.5 <4",
+      "ip-address@>=10.0.0 <10.3.1": "10.3.1",
+      "undici@>=6.0.0 <6.28.0": ">=6.28.0 <7",
+      "esbuild@<0.25.0": ">=0.25.0",
+      "postcss@<8.5.18": ">=8.5.18",
+      "js-yaml@>=3.0.0 <3.15.1": ">=3.15.1 <4",
+      "brace-expansion@>=3.0.0 <5.0.8": ">=5.0.8",
+      "ws@>=8.0.0 <8.20.1": ">=8.20.1 <9",
+      "uuid@<11.1.1": ">=11.1.1",
+      "qs@>=6.11.1 <=6.15.1": ">=6.15.2"
+    },
+    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"]
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@playwright/test": "^1.58.2",
+    "husky": "^9.1.7",
+    "knip": "^6.32.0",
+    "lint-staged": "^15.5.2",
+    "tsup": "^8.3.5",
+    "vitest": "^4.1.4",
+    "zod": "^3.24.1"
+  }
+}

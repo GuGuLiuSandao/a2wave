@@ -1,0 +1,1020 @@
+/* Cascade layer 顺序：antd 置于 Tailwind 的 base 之后、components/utilities 之前。
+   配合 app.tsx 的 <StyleProvider layer>（antd 全部样式进 @layer antd），使 antd 组件样式
+   仍盖过 Tailwind preflight(base)，但 Tailwind 工具类(utilities)能稳定盖过 antd 的全局
+   reset（如 .ant-app a 的 link 颜色）。此 @layer 声明须在 @import 之前。 */
+@layer theme, base, antd, components, utilities;
+@import "tailwindcss";
+@custom-variant dark (&:where([data-appearance="dark"], [data-appearance="dark"] *));
+
+@theme {
+  /* ─── Design Tokens (Cursor-inspired warm palette) ────────────────
+   *  JS mirror: src/lib/tokens.ts — keep both in sync.
+   *
+   *  Layer 1 — Primitive  (raw values)
+   *  Layer 2 — Semantic   (contextual meaning)
+   *  Layer 3 — Component  (specific usage)
+   * ─────────────────────────────────────────────────────────────── */
+
+  /* ── Layer 1: Primitive — warm neutral scale ── */
+  --color-warm-50: #faf9f7;
+  --color-warm-100: #f3f1ed;
+  --color-warm-200: #e8e5df;
+  --color-warm-300: #d4d0c8;
+  --color-warm-400: #a8a29e;
+  --color-warm-500: #78716c;
+  --color-warm-600: #57534e;
+  --color-warm-700: #44403c;
+  --color-warm-800: #292524;
+  --color-warm-900: #1c1917;
+
+  /* ── Layer 2: Semantic — surfaces, text, brand ── */
+  --color-background: #faf9f7; /* warm-50  */
+  --color-foreground: #1c1917; /* warm-900 */
+  --color-card: #ffffff;
+  --color-card-foreground: #1c1917; /* warm-900 */
+  --color-muted: #f3f1ed; /* warm-100 */
+  --color-muted-foreground: #78716c; /* warm-500 */
+  --color-border: #e8e5df; /* warm-200 */
+  --color-input: #e8e5df; /* warm-200 */
+  --color-ring: #818cf8; /* indigo-400 — lighter than brand fill, cleaner focus halo */
+
+  /* Brand indigo — a small scale so ring / primary / press states differ.
+     Previously all three collapsed onto the single #6366f1, leaving buttons
+     and links with no distinct hover/active feedback. */
+  --color-indigo-50: #eef2ff;
+  --color-indigo-400: #818cf8;
+  --color-indigo-500: #6366f1;
+  --color-indigo-600: #4f46e5;
+  --color-indigo-700: #4338ca;
+
+  /* Status primitives — success (emerald) / warning (amber) / error (red),
+     each a small scale: 50 tint surface · 400/500 tone · 600/700 hover.
+     Prefer the semantic status tokens below over raw shades in components. */
+  --color-emerald-50: #ecfdf5;
+  --color-emerald-400: #34d399;
+  --color-emerald-500: #10b981;
+  --color-emerald-600: #059669;
+  --color-emerald-700: #047857;
+  --color-amber-50: #fffbeb;
+  --color-amber-400: #fbbf24;
+  --color-amber-500: #f59e0b;
+  --color-amber-600: #d97706;
+  --color-amber-700: #b45309;
+  --color-red-50: #fef2f2;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
+  --color-red-700: #b91c1c;
+
+  --color-primary: #6264ee; /* AA with white primary foreground */
+  --color-primary-hover: #4f46e5; /* indigo-600 — hover/press for primary surfaces */
+  --color-primary-active: #4338ca; /* indigo-700 — pressed */
+  --color-primary-foreground: #ffffff;
+  --color-primary-subtle: #eef2ff; /* indigo-50 — soft brand surface (tinted callouts) */
+  --color-interactive-foreground: #4338ca;
+  --color-secondary: #f3f1ed; /* warm-100 */
+  --color-secondary-foreground: #44403c; /* warm-700 */
+  --color-accent: #f3f1ed; /* warm-100 */
+  --color-accent-foreground: #44403c; /* warm-700 */
+
+  /* ── Interaction states — hover / selected ──
+   *  Hover is a translucent brand *tint*, never an opaque grey fill. Two
+   *  reasons this is its own token instead of reusing --color-muted:
+   *
+   *  1. --color-muted doubles as a resting surface (rows sit at bg-muted/40),
+   *     so hovering to full bg-muted collapsed the two into one heavy step —
+   *     a grey slab dropping over the row.
+   *  2. Being translucent, one value composites correctly over white cards,
+   *     tinted rows and panel headers alike, so the perceived delta stays
+   *     constant instead of depending on what sits underneath.
+   *
+   *  hover → selected are now two stops of the same indigo, so pointing at a
+   *  row previews the colour it takes when chosen rather than flashing grey.
+   *  Use `hover:bg-surface-hover` / `bg-surface-selected`; do not hand-roll
+   *  bg-muted/NN hover values. */
+  --color-surface-hover: color-mix(in srgb, var(--color-primary) 5%, transparent);
+  --color-surface-selected: color-mix(in srgb, var(--color-primary) 10%, transparent);
+
+  /* Status semantics — solid tone + white foreground for fills, plus a
+     *-subtle surface for soft info-boxes (design-tokens.md "info areas"). */
+  --color-destructive: #b91c1c; /* readable on destructive-subtle */
+  --color-destructive-foreground: #ffffff;
+  --color-destructive-subtle: #fef2f2; /* red-50 */
+  --color-success: #047857; /* readable on success-subtle */
+  --color-success-foreground: #ffffff;
+  --color-success-subtle: #ecfdf5; /* emerald-50 */
+  --color-warning: #b45309; /* readable on warning-subtle */
+  --color-warning-foreground: #ffffff;
+  --color-warning-subtle: #fffbeb; /* amber-50 */
+
+  /* Public authentication brand panel. Its surface and both text roles are
+     explicit because a persisted dark theme also applies before login. */
+  --color-brand-panel: #eeeaf7;
+  --color-brand-panel-foreground: #1c1917;
+  --color-brand-panel-muted-foreground: #57534e;
+  --color-brand-mark-surface: #ffffff;
+
+  /* Code, Markdown and native chrome remain semantic so every theme can keep
+     editors, logs and scrollbars legible without component-level branches. */
+  --color-code-background: #f3f1ed;
+  --color-code-foreground: #292524;
+  --color-code-border: #e8e5df;
+  --color-code-selection: #a8b8f5;
+  --color-code-variable: #4f46e5;
+  --color-scrollbar: #d4d0c8;
+  --color-scrollbar-hover: #a8a29e;
+  --color-gradient-accent: #7c3aed;
+  --color-overlay: rgb(15 12 10 / 0.24);
+
+  /* ── Layer 3: Component — sidebar ──
+   *  Inactive nav labels use `--color-sidebar-foreground` (warm-600): a
+   *  crisper mid-tone than muted-foreground so the *primary* navigation
+   *  never reads as disabled. Hover deepens to warm-800, active flips to
+   *  a dedicated active surface and foreground. Keep these component tokens in use (layout.tsx) —
+   *  don't route the sidebar through the generic muted-foreground. */
+  --color-sidebar: #ffffff;
+  --color-sidebar-foreground: #57534e; /* warm-600 */
+  --color-sidebar-foreground-hover: #292524; /* warm-800 */
+  --color-sidebar-border: #f3f1ed; /* warm-100 */
+  --color-sidebar-muted: #faf9f7; /* warm-50  */
+  --color-sidebar-active-background: #eef2ff;
+  --color-sidebar-active-foreground: #4338ca;
+  --color-sidebar-active-border: #c7d2fe;
+
+  /* ── Layer 3: Component — content measure ──
+   *  Caps the main content column so long-form text and forms keep a
+   *  readable line length on wide monitors; the shell centres it (`mx-auto`
+   *  in layout.tsx) so collapsing the sidebar grows the left/right gutters
+   *  symmetrically instead of sliding the content sideways. Sticky action
+   *  bars sit inside the capped container and should use `w-full` — never
+   *  re-declare this value, or they drift out of alignment with the form
+   *  above them.
+   *
+   *  Set well above a prose-style ~1100px measure: these pages are config
+   *  forms, run tables and card grids, where width buys columns rather than
+   *  longer lines. Card grids pair this with an `xl:grid-cols-4` tier, so the
+   *  extra room becomes a fourth column instead of the same three cards
+   *  stretched wider — width is only worth taking if something fills it.
+   *
+   *  This cap is absolute: there is deliberately NO per-page opt-out. A page
+   *  that feels cramped is a page whose content needs rethinking (drop a
+   *  column, truncate an id, move detail into a drawer) — widening one route
+   *  past the others fractures the shell, so every page reflows to a
+   *  different rhythm and the sidebar-collapse animation lands differently
+   *  depending on where you are. Wide tables handle overflow themselves via
+   *  antd `scroll={{ x }}`, which degrades locally instead of globally. */
+  --max-width-content: 1440px;
+
+  /* ── Radii ── */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  /* ── Shadows — warm, diffused (tinted with warm-900 rgb 28 25 23, not
+   *  neutral black, so elevation stays cohesive with the warm palette).
+   *  xs→sm→md: resting cards. lg: hover lift. xl: floating overlays
+   *  (modal / popover / dropdown) — antd's boxShadowSecondary is aligned
+   *  to this in tokens.ts so overlays don't fall back to a cool-grey drop. */
+  --shadow-xs: 0 1px 2px 0 rgb(28 25 23 / 0.03);
+  --shadow-sm: 0 1px 3px 0 rgb(28 25 23 / 0.04), 0 1px 2px -1px rgb(28 25 23 / 0.03);
+  --shadow-md: 0 4px 6px -1px rgb(28 25 23 / 0.05), 0 2px 4px -2px rgb(28 25 23 / 0.03);
+  --shadow-lg: 0 10px 15px -3px rgb(28 25 23 / 0.06), 0 4px 6px -4px rgb(28 25 23 / 0.03);
+  --shadow-xl: 0 20px 25px -5px rgb(28 25 23 / 0.08), 0 8px 10px -6px rgb(28 25 23 / 0.05);
+
+  /* ── Typography scale ──
+   *  The app's default body size is `sm` (13px) — set via antd
+   *  token.fontSize in tokens.ts. `base` (14px) is a deliberate step *up*
+   *  from body for card titles / emphasis, NOT the document default; the two
+   *  are distinct rungs, not a naming accident. Scale climbs 2xs→2xl. */
+  --font-size-2xs: 0.625rem; /* 10px — IDs, meta */
+  --font-size-xs: 0.6875rem; /* 11px — captions, badges */
+  --font-size-sm: 0.8125rem; /* 13px — body / labels (app default) */
+  --font-size-base: 0.875rem; /* 14px — emphasis over body: card titles */
+  --font-size-lg: 0.9375rem; /* 15px — section headings */
+  --font-size-xl: 1rem; /* 16px — sub-headings */
+  --font-size-2xl: 1.5rem; /* 24px — page headings */
+
+  /* ── Font weight (Layer 1: Primitive) ── */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  /* ── Layer 3: Component — tab nav ── */
+  --font-size-tab-nav: 0.9375rem; /* 15px — page-level tab labels */
+  --font-weight-tab-nav: 600;
+
+  /* ── Layer 3: Component — segmented panel ── */
+  /* Connects a Segmented control to its content area in a single bordered card */
+  --segmented-panel-border: color-mix(in srgb, var(--color-border) 60%, transparent);
+  --segmented-panel-header-bg: color-mix(in srgb, var(--color-muted) 40%, transparent);
+  --segmented-panel-body-bg: color-mix(in srgb, var(--color-muted) 10%, transparent);
+  --segmented-panel-header-px: 0.75rem; /* px-3 */
+  --segmented-panel-header-py: 0.625rem; /* py-2.5 */
+  --segmented-panel-body-p: 1rem; /* p-4 */
+
+  /* ── Brand gradient stops ──
+     Named so the .bg-brand-gradient* helpers below don't scatter bare hex
+     (per docs/agent/design-tokens.md). Violet stops accent the indigo brand. */
+  --color-violet-500: #8b5cf6;
+  --color-violet-400: #a78bfa;
+
+  /* ── Animation duration ── */
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+}
+
+/* First-paint fallbacks mirror the typed ThemeSpec registry. The synchronous
+   head bootstrap sets data-theme before CSS is painted; ThemeProvider then
+   applies the same registry values inline and owns live preview/system updates. */
+html:is(
+    [data-theme="wave-dark"],
+    [data-theme="midnight"],
+    [data-theme="forest"],
+    [data-theme="graphite"]
+  ) {
+  --color-warm-50: #1b1e25;
+  --color-warm-100: #232730;
+  --color-warm-200: #303641;
+  --color-warm-300: #454c59;
+  --color-warm-400: #747d8d;
+  --color-warm-500: #a1a8b3;
+  --color-warm-600: #c0c5cd;
+  --color-warm-700: #d7dae0;
+  --color-warm-800: #e8eaed;
+  --color-warm-900: #f6f7f8;
+  --color-emerald-50: #102a24;
+  --color-emerald-400: #6ee7b7;
+  --color-emerald-500: #34d399;
+  --color-emerald-600: #6ee7b7;
+  --color-emerald-700: #a7f3d0;
+  --color-amber-50: #30240f;
+  --color-amber-400: #fcd34d;
+  --color-amber-500: #fbbf24;
+  --color-amber-600: #fcd34d;
+  --color-amber-700: #fde68a;
+  --color-red-50: #351719;
+  --color-red-400: #fca5a5;
+  --color-red-500: #f87171;
+  --color-red-600: #fca5a5;
+  --color-red-700: #fecaca;
+}
+
+html[data-theme="wave-dark"] {
+  --color-background: #0f1115;
+  --color-foreground: #f4f4f5;
+  --color-card: #171a21;
+  --color-card-foreground: #f4f4f5;
+  --color-muted: #222630;
+  --color-muted-foreground: #a1a8b3;
+  --color-border: #303641;
+  --color-input: #3a414d;
+  --color-ring: #a5b4fc;
+  --color-primary: #818cf8;
+  --color-primary-hover: #a5b4fc;
+  --color-primary-active: #6366f1;
+  --color-primary-foreground: #101116;
+  --color-primary-subtle: #252b4a;
+  --color-interactive-foreground: #a5b4fc;
+  --color-secondary: #252a34;
+  --color-secondary-foreground: #e4e4e7;
+  --color-accent: #292e3a;
+  --color-accent-foreground: #f4f4f5;
+  --color-surface-hover: color-mix(in srgb, #818cf8 9%, transparent);
+  --color-surface-selected: color-mix(in srgb, #818cf8 16%, transparent);
+  --color-brand-panel: #121622;
+  --color-brand-panel-foreground: #f4f4f5;
+  --color-brand-panel-muted-foreground: #b7bdc8;
+  --color-brand-mark-surface: #ffffff;
+  --color-sidebar: #12141a;
+  --color-sidebar-foreground: #b7bdc8;
+  --color-sidebar-foreground-hover: #ffffff;
+  --color-sidebar-border: #262b35;
+  --color-sidebar-muted: #1b1e26;
+  --color-sidebar-active-background: #252b4a;
+  --color-sidebar-active-foreground: #c7d2fe;
+  --color-sidebar-active-border: #4f5b91;
+  --color-code-background: #11141a;
+  --color-code-foreground: #e7e9ee;
+  --color-code-border: #343a46;
+  --color-code-selection: #3a4478;
+  --color-code-variable: #a5b4fc;
+  --color-scrollbar: #3a414d;
+  --color-scrollbar-hover: #596272;
+  --color-gradient-accent: #c4b5fd;
+  --color-overlay: rgb(0 0 0 / 0.58);
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.2);
+  --shadow-sm: 0 2px 5px rgb(0 0 0 / 0.24);
+  --shadow-md: 0 8px 18px -8px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 16px 32px -12px rgb(0 0 0 / 0.58);
+  --shadow-xl: 0 24px 50px -16px rgb(0 0 0 / 0.68);
+}
+
+html[data-theme="neo-yellow"] {
+  --color-warm-50: #fffdf5;
+  --color-warm-100: #f4f1e8;
+  --color-warm-200: #dfdbcf;
+  --color-warm-300: #c6c0b3;
+  --color-warm-400: #969083;
+  --color-warm-500: #69645a;
+  --color-warm-600: #4d4942;
+  --color-warm-700: #38352f;
+  --color-warm-800: #24231f;
+  --color-warm-900: #151515;
+  --color-background: #f4f1e8;
+  --color-foreground: #151515;
+  --color-card: #fffdf5;
+  --color-card-foreground: #151515;
+  --color-muted: #ebe7da;
+  --color-muted-foreground: #4d4942;
+  --color-border: #171717;
+  --color-input: #171717;
+  --color-ring: #171717;
+  --color-primary: #ddf52f;
+  --color-primary-hover: #cde71e;
+  --color-primary-active: #bdd70f;
+  --color-primary-foreground: #121212;
+  --color-primary-subtle: #f2ff9a;
+  --color-interactive-foreground: #3d430c;
+  --color-secondary: #171717;
+  --color-secondary-foreground: #fffdf5;
+  --color-accent: #b9a7ff;
+  --color-accent-foreground: #171717;
+  --color-surface-hover: color-mix(in srgb, #ddf52f 28%, transparent);
+  --color-surface-selected: color-mix(in srgb, #ddf52f 50%, transparent);
+  --color-brand-panel: #eee9dc;
+  --color-brand-panel-foreground: #151515;
+  --color-brand-panel-muted-foreground: #4d4942;
+  --color-brand-mark-surface: #ffffff;
+  --color-sidebar: #eee9dc;
+  --color-sidebar-foreground: #4d4942;
+  --color-sidebar-foreground-hover: #151515;
+  --color-sidebar-border: #171717;
+  --color-sidebar-muted: #e2ddcf;
+  --color-sidebar-active-background: #ddf52f;
+  --color-sidebar-active-foreground: #151515;
+  --color-sidebar-active-border: #171717;
+  --color-code-background: #171717;
+  --color-code-foreground: #f7f3e8;
+  --color-code-border: #171717;
+  --color-code-selection: #536323;
+  --color-code-variable: #151515;
+  --color-scrollbar: #69645a;
+  --color-scrollbar-hover: #171717;
+  --color-gradient-accent: #8d6cff;
+  --color-overlay: rgb(23 23 23 / 0.28);
+  --color-destructive: #b91c1c;
+  --color-destructive-foreground: #ffffff;
+  --color-destructive-subtle: #ffe2dc;
+  --color-success: #0f6d41;
+  --color-success-foreground: #ffffff;
+  --color-success-subtle: #dff7e9;
+  --color-warning: #92400e;
+  --color-warning-foreground: #ffffff;
+  --color-warning-subtle: #fff0bd;
+  --radius-sm: 0.0625rem;
+  --radius-md: 0.125rem;
+  --radius-lg: 0.125rem;
+  --radius-xl: 0.25rem;
+  --shadow-xs: 1px 1px 0 #171717;
+  --shadow-sm: 2px 2px 0 #171717;
+  --shadow-md: 3px 3px 0 #171717;
+  --shadow-lg: 5px 5px 0 #171717;
+  --shadow-xl: 8px 8px 0 #171717;
+}
+
+html[data-theme="midnight"] {
+  --color-background: #080d18;
+  --color-foreground: #eaf2ff;
+  --color-card: #0f1828;
+  --color-card-foreground: #eaf2ff;
+  --color-muted: #172338;
+  --color-muted-foreground: #94a7c2;
+  --color-border: #273854;
+  --color-input: #334867;
+  --color-ring: #67d9ff;
+  --color-primary: #55d6ff;
+  --color-primary-hover: #83e3ff;
+  --color-primary-active: #2abce9;
+  --color-primary-foreground: #06111a;
+  --color-primary-subtle: #12344a;
+  --color-interactive-foreground: #67d9ff;
+  --color-secondary: #1a2941;
+  --color-secondary-foreground: #dce9fb;
+  --color-accent: #26395a;
+  --color-accent-foreground: #f2f7ff;
+  --color-surface-hover: color-mix(in srgb, #55d6ff 10%, transparent);
+  --color-surface-selected: color-mix(in srgb, #55d6ff 18%, transparent);
+  --color-brand-panel: #081426;
+  --color-brand-panel-foreground: #eaf2ff;
+  --color-brand-panel-muted-foreground: #9fb1ca;
+  --color-brand-mark-surface: #ffffff;
+  --color-sidebar: #0a1220;
+  --color-sidebar-foreground: #9fb1ca;
+  --color-sidebar-foreground-hover: #f4f8ff;
+  --color-sidebar-border: #1d2b42;
+  --color-sidebar-muted: #101b2c;
+  --color-sidebar-active-background: #12344a;
+  --color-sidebar-active-foreground: #bdefff;
+  --color-sidebar-active-border: #2abce9;
+  --color-code-background: #070b13;
+  --color-code-foreground: #dce9fb;
+  --color-code-border: #29405f;
+  --color-code-selection: #174866;
+  --color-code-variable: #67d9ff;
+  --color-scrollbar: #314867;
+  --color-scrollbar-hover: #4b678d;
+  --color-gradient-accent: #8b9cff;
+  --color-overlay: rgb(0 0 0 / 0.62);
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --shadow-xs: 0 1px 2px rgb(2 8 23 / 0.34);
+  --shadow-sm: 0 4px 12px -5px rgb(30 116 160 / 0.4);
+  --shadow-md: 0 10px 28px -12px rgb(31 145 194 / 0.52);
+  --shadow-lg: 0 20px 42px -18px rgb(24 120 168 / 0.62);
+  --shadow-xl: 0 30px 64px -22px rgb(18 96 143 / 0.72);
+}
+
+html[data-theme="forest"] {
+  --color-background: #0e140f;
+  --color-foreground: #edf4e8;
+  --color-card: #161e17;
+  --color-card-foreground: #edf4e8;
+  --color-muted: #202a21;
+  --color-muted-foreground: #9eae9c;
+  --color-border: #344136;
+  --color-input: #405043;
+  --color-ring: #bef264;
+  --color-primary: #a3e635;
+  --color-primary-hover: #bef264;
+  --color-primary-active: #84cc16;
+  --color-primary-foreground: #102006;
+  --color-primary-subtle: #26391a;
+  --color-interactive-foreground: #bef264;
+  --color-secondary: #263128;
+  --color-secondary-foreground: #e7efe2;
+  --color-accent: #304033;
+  --color-accent-foreground: #f2f7ef;
+  --color-surface-hover: color-mix(in srgb, #a3e635 9%, transparent);
+  --color-surface-selected: color-mix(in srgb, #a3e635 17%, transparent);
+  --color-brand-panel: #0b150d;
+  --color-brand-panel-foreground: #edf4e8;
+  --color-brand-panel-muted-foreground: #acbba9;
+  --color-brand-mark-surface: #ffffff;
+  --color-sidebar: #0b110c;
+  --color-sidebar-foreground: #acbba9;
+  --color-sidebar-foreground-hover: #f4f9f1;
+  --color-sidebar-border: #29342b;
+  --color-sidebar-muted: #151c16;
+  --color-sidebar-active-background: #26391a;
+  --color-sidebar-active-foreground: #d9f99d;
+  --color-sidebar-active-border: #6e9f35;
+  --color-code-background: #0a0f0b;
+  --color-code-foreground: #e3ebdf;
+  --color-code-border: #344637;
+  --color-code-selection: #354b26;
+  --color-code-variable: #bef264;
+  --color-scrollbar: #3a4a3d;
+  --color-scrollbar-hover: #5d705f;
+  --color-gradient-accent: #67e8a5;
+  --color-overlay: rgb(0 0 0 / 0.6);
+  --radius-sm: 0.5rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+  --shadow-xs: 0 1px 2px rgb(2 10 4 / 0.28);
+  --shadow-sm: 0 3px 8px rgb(2 12 5 / 0.32);
+  --shadow-md: 0 12px 24px -10px rgb(1 12 4 / 0.64);
+  --shadow-lg: 0 22px 44px -16px rgb(1 10 3 / 0.72);
+  --shadow-xl: 0 34px 70px -24px rgb(0 8 2 / 0.8);
+}
+
+html[data-theme="graphite"] {
+  --color-background: #111111;
+  --color-foreground: #f1f0ed;
+  --color-card: #1a1a1a;
+  --color-card-foreground: #f1f0ed;
+  --color-muted: #252525;
+  --color-muted-foreground: #aaa7a2;
+  --color-border: #383838;
+  --color-input: #444444;
+  --color-ring: #ffda7c;
+  --color-primary: #f4c95d;
+  --color-primary-hover: #ffda7c;
+  --color-primary-active: #dcae3d;
+  --color-primary-foreground: #1b1304;
+  --color-primary-subtle: #392f19;
+  --color-interactive-foreground: #ffda7c;
+  --color-secondary: #2b2b2b;
+  --color-secondary-foreground: #eceae6;
+  --color-accent: #333333;
+  --color-accent-foreground: #ffffff;
+  --color-surface-hover: color-mix(in srgb, #f4c95d 9%, transparent);
+  --color-surface-selected: color-mix(in srgb, #f4c95d 17%, transparent);
+  --color-brand-panel: #161616;
+  --color-brand-panel-foreground: #f1f0ed;
+  --color-brand-panel-muted-foreground: #b6b3ae;
+  --color-brand-mark-surface: #ffffff;
+  --color-sidebar: #151515;
+  --color-sidebar-foreground: #b6b3ae;
+  --color-sidebar-foreground-hover: #ffffff;
+  --color-sidebar-border: #303030;
+  --color-sidebar-muted: #1e1e1e;
+  --color-sidebar-active-background: #392f19;
+  --color-sidebar-active-foreground: #ffe6a3;
+  --color-sidebar-active-border: #8d7138;
+  --color-code-background: #0d0d0d;
+  --color-code-foreground: #e8e6e2;
+  --color-code-border: #3d3d3d;
+  --color-code-selection: #57461f;
+  --color-code-variable: #ffda7c;
+  --color-scrollbar: #424242;
+  --color-scrollbar-hover: #626262;
+  --color-gradient-accent: #ff8a4c;
+  --color-overlay: rgb(0 0 0 / 0.64);
+  --radius-sm: 0.125rem;
+  --radius-md: 0.25rem;
+  --radius-lg: 0.375rem;
+  --radius-xl: 0.5rem;
+  --shadow-xs: 0 1px 0 rgb(255 255 255 / 0.035), 0 2px 0 rgb(0 0 0 / 0.48);
+  --shadow-sm: 0 1px 0 rgb(255 255 255 / 0.04), 0 5px 0 -2px rgb(0 0 0 / 0.58);
+  --shadow-md: 0 1px 0 rgb(255 255 255 / 0.045), 0 10px 0 -5px rgb(0 0 0 / 0.7);
+  --shadow-lg: 0 1px 0 rgb(255 255 255 / 0.05), 0 16px 0 -7px rgb(0 0 0 / 0.76);
+  --shadow-xl: 0 1px 0 rgb(255 255 255 / 0.055), 0 24px 0 -10px rgb(0 0 0 / 0.84);
+}
+
+html[data-appearance="dark"] {
+  color-scheme: dark;
+  --color-destructive: #fb7185;
+  --color-destructive-foreground: #27070e;
+  --color-destructive-subtle: #3b181f;
+  --color-success: #4ade80;
+  --color-success-foreground: #06200e;
+  --color-success-subtle: #15291c;
+  --color-warning: #fbbf24;
+  --color-warning-foreground: #241801;
+  --color-warning-subtle: #33260d;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  font-family: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  touch-action: manipulation;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+::selection {
+  background-color: var(--color-primary);
+  color: var(--color-primary-foreground);
+}
+
+/* Selection on primary-bg elements (e.g. user chat bubbles) needs contrast */
+.bg-primary ::selection,
+.bg-primary::selection {
+  background-color: rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+}
+
+/* Scrollbar — theme-aware minimal */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scrollbar-hover);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar) transparent;
+}
+
+/* ─── Utility animations ─── */
+
+@keyframes wave-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.85;
+  }
+}
+
+.animate-wave-pulse {
+  animation: wave-pulse 3s ease-in-out infinite;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* ─── Brand waveform field (login / setup left panel) ─── */
+
+.login-brand-panel {
+  background-color: var(--color-brand-panel);
+  background-image: radial-gradient(
+      110% 90% at 12% 8%,
+      color-mix(in srgb, var(--color-primary) 16%, transparent),
+      transparent 58%
+    ),
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--color-brand-panel) 94%, var(--color-gradient-accent)),
+      var(--color-brand-panel) 62%
+    );
+}
+
+/* The grid is texture, not a chart: hairlines at a fraction of the accent, on a
+   wider cell, faded out toward the panel edges so no single line reads as an
+   edge. The mask is what keeps it from looking like graph paper. */
+.brand-wave-grid {
+  background-image: linear-gradient(
+      to right,
+      color-mix(in srgb, var(--color-gradient-accent) 5%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--color-gradient-accent) 5%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 78% 70% at 50% 45%, #000 20%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 78% 70% at 50% 45%, #000 20%, transparent 100%);
+}
+
+.brand-wave-bloom {
+  background: radial-gradient(
+    ellipse,
+    color-mix(in srgb, var(--color-primary) 20%, transparent),
+    transparent 70%
+  );
+  animation: wave-glow 7s ease-in-out infinite;
+}
+
+.brand-wave-scanline {
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--color-gradient-accent) 55%, transparent),
+    transparent
+  );
+  animation: wave-scan 9s ease-in-out infinite;
+}
+
+/* Each wave layer is drawn twice end-to-end and slid one tile-width left,
+   so the loop is seamless. Different layers use different durations for a
+   parallax drift. */
+@keyframes wave-drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* Vertical scan sweep, like an oscilloscope trigger line. */
+@keyframes wave-scan {
+  0% {
+    transform: translateX(-20%);
+    opacity: 0;
+  }
+  15%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(120%);
+    opacity: 0;
+  }
+}
+
+/* Slow breathing of the emitted glow behind the crest. */
+@keyframes wave-glow {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wave-layer,
+  .wave-scanline,
+  .wave-bloom {
+    animation: none !important;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent 0%, rgb(99 102 241 / 0.04) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 3s ease-in-out infinite;
+}
+
+/* ─── Chat surfaces (test drawer + chat app page) ─── */
+
+/* Each bubble rises slightly as it lands, so a streamed reply reads as arriving
+   rather than blinking into place. */
+@keyframes chat-message-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-chat-message-in {
+  animation: chat-message-in 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Typing indicator dots, staggered via inline animation-delay. */
+@keyframes chat-typing-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+.animate-chat-typing-dot {
+  animation: chat-typing-dot 1.2s ease-in-out infinite;
+}
+
+/* Suggested-question chips stagger in on the empty state. */
+.animate-chat-chip-in {
+  animation: chat-message-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-chat-message-in,
+  .animate-chat-typing-dot,
+  .animate-chat-chip-in {
+    animation: none !important;
+  }
+}
+
+/* Warm gradient backgrounds */
+.bg-warm-gradient {
+  background: linear-gradient(
+    135deg,
+    var(--color-warm-50) 0%,
+    var(--color-warm-100) 50%,
+    var(--color-warm-50) 100%
+  );
+}
+
+.bg-brand-gradient {
+  background: linear-gradient(
+    135deg,
+    var(--color-primary) 0%,
+    var(--color-gradient-accent) 60%,
+    var(--color-primary-hover) 100%
+  );
+}
+
+.bg-brand-gradient-subtle {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-indigo-500) 6%, transparent) 0%,
+    color-mix(in srgb, var(--color-violet-500) 4%, transparent) 100%
+  );
+}
+
+/* Card hover glow */
+.card-glow {
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+.card-glow:hover {
+  box-shadow: 0 4px 6px -1px rgb(28 25 23 / 0.05), 0 2px 4px -2px rgb(28 25 23 / 0.03), 0 0 0 1px
+    rgb(99 102 241 / 0.06);
+}
+
+/* Agent detail tabs — nav typography (font-size via antd token, font-weight via CSS) */
+.agent-detail-tabs .ant-tabs-tab {
+  font-size: var(--font-size-tab-nav);
+  font-weight: var(--font-weight-tab-nav);
+  padding-bottom: 6px;
+}
+
+/* Ant Design Drawer — disable close animation, keep open animation */
+.ant-drawer:not(.ant-drawer-open) .ant-drawer-content-wrapper {
+  transition: none !important;
+}
+.ant-drawer:not(.ant-drawer-open) .ant-drawer-mask {
+  transition: none !important;
+}
+
+/* Specific class to disable drawer exit animation */
+.no-close-animation.ant-drawer-content-wrapper {
+  transition: none !important;
+}
+.ant-drawer.no-close-animation .ant-drawer-content-wrapper {
+  transition: none !important;
+}
+.ant-drawer.no-close-animation:not(.ant-drawer-open) {
+  display: none !important;
+}
+.ant-drawer.no-close-animation:not(.ant-drawer-open) .ant-drawer-content-wrapper {
+  transition: none !important;
+  transform: none !important;
+}
+
+/* Segmented panel — tab header connected to content in one bordered card
+   Usage:
+     <div class="segmented-panel">
+       <div class="segmented-panel-header"><Segmented /></div>
+       <div class="segmented-panel-body">…content…</div>
+     </div>
+*/
+.segmented-panel {
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--segmented-panel-border);
+}
+.segmented-panel-header {
+  padding: var(--segmented-panel-header-py) var(--segmented-panel-header-px);
+  background-color: var(--segmented-panel-header-bg);
+  border-bottom: 1px solid var(--segmented-panel-border);
+}
+.segmented-panel-body {
+  padding: var(--segmented-panel-body-p);
+  background-color: var(--segmented-panel-body-bg);
+}
+
+/* Ant Design Segmented — pill shadow for active item (token can't set box-shadow).
+   The selected pill is a solid primary fill, so the lift is tinted with the brand
+   color; a neutral warm shadow reads as grime against the saturated fill. */
+.ant-segmented .ant-segmented-item-selected {
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--color-primary) 28%, transparent), 0 1px 2px
+    color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+/* Force the selected item's label + icon to the on-primary color. Our options
+   wrap the label in a custom <span> with a lucide icon (currentColor); without
+   this the icon/text inherits the muted color and renders dark-grey on the
+   indigo fill. !important so it wins regardless of @layer ordering. */
+.ant-segmented .ant-segmented-item-selected,
+.ant-segmented .ant-segmented-item-selected .ant-segmented-item-label,
+.ant-segmented .ant-segmented-item-selected .ant-segmented-item-label * {
+  color: var(--color-primary-foreground) !important;
+}
+
+/* Nearly-instant switch. rc-segmented relies on the thumb's transitionend to
+   clear its internal `thumbShow` state and restore the item's `-selected` class;
+   a hard `transition: none` never fires that event, stranding the just-clicked
+   item WITHOUT `-selected` — so its label falls back to the muted color and
+   renders dark on the indigo fill. Keep a 1ms transition instead: imperceptible,
+   but it fires transitionend so the selected class (and white text) settles at
+   once. Also snap the label color (no fade through an intermediate tone). */
+.ant-segmented .ant-segmented-thumb {
+  transition-duration: 1ms !important;
+}
+.ant-segmented .ant-segmented-item,
+.ant-segmented .ant-segmented-item-label {
+  transition: none !important;
+}
+
+/* Info panel — the shared "info area" surface (design-tokens.md). A soft brand
+   tint (primary-subtle = indigo-50) over a faint indigo hairline reads as an
+   "informational" surface and stays consistent with other tinted brand markers
+   (e.g. the provider preset badge). Replaces the earlier warm-50 half-tone,
+   which read as a flat grey block. Pair with a leading Info icon +
+   text-sm text-muted-foreground. Error/warning notices override the text color
+   locally (text-destructive) and keep this neutral-informational fill. */
+.info-panel {
+  border-radius: var(--radius-lg);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 18%, transparent);
+  background-color: color-mix(in srgb, var(--color-primary-subtle) 60%, transparent);
+}
+
+/* Dot grid pattern for hero areas */
+.dot-pattern {
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--color-primary) 14%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 24px 24px;
+}
+
+/* Ant Design Table header — separate the header from the rows with one solid
+   rule instead of antd's per-cell vertical tick (killed via the
+   `headerSplitColor` token in tokens.ts). antd draws the header bottom border
+   with the same hairline as every row separator, so the header does not read as
+   a distinct band; darken just that one edge to the full border color while the
+   row separators stay faint. */
+.ant-table-thead > tr > th.ant-table-cell {
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Multi-select whose tags wrap instead of collapsing into "+N".
+   Dropping antd's `maxTagCount="responsive"` shows every selection, but an
+   unbounded selector would grow without limit — and because the config cards
+   are an equal-height grid row, one over-filled picker would stretch every
+   card beside it. Cap the selector at ~3 rows of tags and scroll past that. */
+.select-wrap-tags .ant-select-selector {
+  max-height: 5.75rem;
+  overflow-y: auto;
+}
+
+/* antd centers the suffix arrow against the *whole* selector box, which reads
+   fine on one row but leaves it floating mid-height beside a 3-row tag stack.
+   Pin it to the first row instead. `top` overrides antd's own 50% + translate
+   centering, so the translate has to be undone too. */
+.select-wrap-tags .ant-select-arrow {
+  top: 1rem;
+  transform: none;
+}
+
+/* Ant Design Select dropdown — keep the scrollbar off the option text.
+   The global scrollbar is a 6px overlay with a transparent track, so in a
+   scrolling dropdown it floats *on top of* the option row: long descriptions
+   (which already truncate at the container edge) run underneath the thumb.
+   antd pads the list but not by enough to clear an overlay bar, so reserve the
+   gutter on the scroll container itself. Applies to every Select in the app —
+   the overlap is a property of the scrollbar, not of any one dropdown. */
+.ant-select-dropdown .rc-virtual-list-holder {
+  padding-right: 4px;
+}
+
+/* Ant Design Modal/Tour panel — 去掉打开时聚焦容器(tabindex=-1)带出的浏览器默认 outline，
+   避免整个弹窗/引导框出现一圈"选中"边框（按钮等仍保留 focus-visible 可达性样式） */
+.ant-modal:focus,
+.ant-modal:focus-visible,
+.ant-modal-content:focus,
+.ant-modal-content:focus-visible,
+.ant-tour:focus,
+.ant-tour:focus-visible {
+  outline: none;
+}
