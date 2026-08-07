@@ -44,5 +44,5 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          name: a2wave ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           body: ${{ steps.notes.outputs.notes }}
