@@ -37,7 +37,7 @@
     "yaml": "^2.6.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.5",
+    "@types/node": "^26.1.2",
     "@vitest/coverage-v8": "^4.1.4",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
