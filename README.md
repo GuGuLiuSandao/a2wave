@@ -85,11 +85,29 @@ adversary already inside.
 > Exposing a2wave to untrusted users or running untrusted Agent configurations is out
 > of scope — add your own isolation layer. Full statement: [SECURITY.md](./SECURITY.md).
 
+## Quick Start (CLI)
+
+Installs the published image, writes `docker-compose.yml` + `.env`, starts the
+container and waits until it is healthy — no clone, no build:
+
+```bash
+npm i -g a2wave
+a2wave setup
+```
+
 ## Quick Start (Docker)
+
+From a clone, building the image yourself:
 
 ```bash
 cp .env.example .env       # no edits needed
 docker compose up -d --build
+```
+
+Or run the published image directly:
+
+```bash
+docker pull ghcr.io/lilithgames/a2wave:latest
 ```
 
 Visit **http://localhost:3502**. Then create an Agent, bind a model provider, and

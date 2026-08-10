@@ -30,6 +30,18 @@ import {
 } from '../lib/setup-plan.js'
 import { getVersion } from '../version.js'
 
+/**
+ * Image installed when `--image` is omitted.
+ *
+ * Pinned to this CLI's own version, not `latest`: the platform and the CLI
+ * share one version line, so `a2wave@X.Y.Z` must install the X.Y.Z platform
+ * rather than whatever `latest` happens to point at.
+ *
+ * The tag carries no leading `v` — docker.yml strips it from the git tag, so
+ * the published image for v0.7.1 is `:0.7.1`.
+ */
+export const DEFAULT_IMAGE = `ghcr.io/lilithgames/a2wave:${getVersion()}`
+
 const HEALTH_TIMEOUT_SECONDS = 90
 const HEALTH_POLL_INTERVAL_MS = 2000
 // Per-request cap for the health/readiness probes. Without it a container that
@@ -1247,8 +1259,7 @@ export const setupCommand = defineCommand({
     },
     image: {
       type: 'string',
-      description:
-        'Container image to deploy (REQUIRED until a public registry ships; e.g. a locally built a2wave:latest)',
+      description: `Container image to deploy (default: ${DEFAULT_IMAGE})`,
     },
     yes: {
       type: 'boolean',
@@ -1375,19 +1386,9 @@ export const setupCommand = defineCommand({
     const timeoutSeconds = args['health-timeout']
       ? parseHealthTimeout(args['health-timeout'])
       : HEALTH_TIMEOUT_SECONDS
-    // No default image: the public registry has not shipped yet, so any
-    // default would fail at pull time. TODO(open-source): once the registry
-    // and a CLI↔platform tag-mapping strategy exist, restore a pinned default.
-    const image = args.image?.trim()
-    if (!image) {
-      throw new CliError(
-        [
-          '--image is required: no public a2wave image registry has been published yet.',
-          'Build one locally from the repo (`docker compose build`, image tag `a2wave:latest`), then:',
-          '  a2wave setup --image a2wave:latest',
-        ].join('\n'),
-      )
-    }
+    // Defaults to the published GHCR image for this CLI version; `--image`
+    // overrides it for a locally built or mirrored ref.
+    const image = args.image?.trim() || DEFAULT_IMAGE
     try {
       validateImageRef(image)
     } catch (err) {

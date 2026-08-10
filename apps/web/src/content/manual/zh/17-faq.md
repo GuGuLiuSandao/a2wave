@@ -104,6 +104,8 @@ npm i -g a2wave
 a2wave setup --upgrade --image <新镜像>
 ```
 
+`--image` 可以省略，省略时会升级到与当前 CLI 版本一致的官方镜像（`ghcr.io/lilithgames/a2wave:<CLI 版本>`）——平台与 CLI 共用同一条版本线，所以先 `a2wave update` 再 `a2wave setup --upgrade` 就能把实例升到对应版本。只有在使用自建或私有镜像时才需要显式传入。
+
 它只改写 `.env` 里的 `A2WAVE_IMAGE` 这一行（compose 文件通过变量读取镜像），然后重新拉取并重建 a2wave 服务，等到实例通过健康检查和就绪检查才算成功。命令本身**不会删除数据卷**，`.env` 里除镜像外的内容（`AUTH_SECRET`、`COMPOSE_PROJECT_NAME` 等）逐字节保留，所以登录会话不受影响；`docker-compose.yml` 不会被重新生成，手工加过的挂载、`extra_hosts` 等本地改动原样保留。
 
 如果新镜像起不来或迟迟不就绪，会自动恢复到升级前的镜像并重新启动，确认健康后才结束。

@@ -56,8 +56,9 @@ vi.mock('../../lib/prompt.js', () => ({
 const mockFetch = vi.fn()
 vi.stubGlobal('fetch', mockFetch)
 
-const { setupCommand } = await import('../setup.js')
+const { setupCommand, DEFAULT_IMAGE } = await import('../setup.js')
 const { CliError } = await import('../../errors.js')
+const { getVersion } = await import('../../version.js')
 function mockPortFree(free: boolean): void {
   mockCreateServer.mockReturnValue({
     once(event: string, cb: (err?: Error) => void) {
@@ -88,8 +89,9 @@ async function runSetup(args: Record<string, unknown> = {}): Promise<string> {
   })
   try {
     await (setupCommand.run as (ctx: { args: Record<string, unknown> }) => Promise<void>)({
-      // --image is required until a public registry ships; inject a default so
-      // every test not about that requirement stays focused
+      // Pin an explicit image so tests unrelated to image resolution do not
+      // depend on the CLI's version-derived default; pass `image: undefined`
+      // to exercise that default.
       args: { yes: true, image: 'a2wave:test', ...args },
     })
   } finally {
@@ -394,15 +396,23 @@ describe('a2wave setup', () => {
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
-  it('requires an explicit --image until a public registry ships (no unusable default)', async () => {
-    await expect(runSetup({ dir: '/tmp/a2wave', image: undefined })).rejects.toThrow(/--image/)
-    expect(mockWriteFileSync).not.toHaveBeenCalled()
+  it('defaults --image to the published GHCR image for this CLI version', async () => {
+    await runSetup({ dir: '/tmp/a2wave', image: undefined })
+    expect(writtenFile('.env')).toContain(`A2WAVE_IMAGE=${DEFAULT_IMAGE}`)
   })
 
-  it('the missing --image error explains why and shows a local-build example', async () => {
-    await expect(runSetup({ dir: '/tmp/a2wave', image: undefined })).rejects.toThrow(
-      /docker compose build|registry/i,
-    )
+  it('pins the default image to this CLI version, never a floating tag', async () => {
+    // The platform and the CLI share one version line, so `a2wave@X.Y.Z` must
+    // install the X.Y.Z image. A `latest` default would silently pair a CLI
+    // with a platform build it was never tested against.
+    expect(DEFAULT_IMAGE).toBe(`ghcr.io/lilithgames/a2wave:${getVersion()}`)
+    expect(DEFAULT_IMAGE).not.toMatch(/:latest$/)
+  })
+
+  it('uses the docker tag spelling, which carries no leading v', async () => {
+    // docker.yml strips the leading `v` from the git tag, so the image is
+    // `:0.7.1`. Defaulting to `:v0.7.1` would 404 at pull time.
+    expect(DEFAULT_IMAGE).not.toMatch(/:v[0-9]/)
   })
 
   it('respects --image override', async () => {
@@ -1061,8 +1071,12 @@ describe('a2wave setup --upgrade', () => {
     )
   })
 
-  it('requires --image', async () => {
-    await expect(runSetup({ dir: DIR, upgrade: true, image: undefined })).rejects.toThrow(/--image/)
+  it('upgrades to this CLI version’s image when --image is omitted', async () => {
+    // Upgrading after `a2wave update` should move the platform to the version
+    // the freshly-updated CLI was built against, without retyping the ref.
+    await runSetup({ dir: DIR, upgrade: true, image: undefined })
+    const envWrite = mockWriteFileSync.mock.calls.find(([p]) => p.endsWith('.env'))
+    expect(envWrite?.[1]).toContain(`A2WAVE_IMAGE=${DEFAULT_IMAGE}`)
   })
 
   it('rejects an image ref that could inject YAML', async () => {

@@ -104,6 +104,8 @@ For an instance installed with `a2wave setup`, run this from a terminal that can
 a2wave setup --upgrade --image <new image>
 ```
 
+`--image` is optional: omitting it upgrades to the official image matching the CLI's own version (`ghcr.io/lilithgames/a2wave:<cli-version>`). The platform and the CLI share one version line, so `a2wave update` followed by `a2wave setup --upgrade` moves the instance to the matching release. Pass the flag only for a self-built or private image.
+
 It rewrites only the `A2WAVE_IMAGE` line in `.env` (the compose file reads the image through that variable), then re-pulls and recreates the a2wave service, and only reports success once the instance passes both its health and readiness checks. The command **never deletes the data volume**, and everything else in `.env` (`AUTH_SECRET`, `COMPOSE_PROJECT_NAME`, …) survives byte-for-byte, so existing login sessions are unaffected; `docker-compose.yml` is never regenerated, so local edits such as extra mounts or `extra_hosts` are preserved.
 
 If the new image fails to start or never becomes ready, it automatically restores the previous image, brings it back up, and confirms it is healthy before finishing.

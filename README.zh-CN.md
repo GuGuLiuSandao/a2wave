@@ -74,11 +74,29 @@ Shell 执行、注入的凭证。平台刻意**不**在作者之间做沙箱隔�
 > 把 a2wave 暴露给不可信用户，或运行不可信的 Agent 配置，超出当前设计范围——请自行添加
 > 隔离层。完整说明见 [SECURITY.md](./SECURITY.md)。
 
+## 快速开始（CLI）
+
+自动拉取已发布的镜像，生成 `docker-compose.yml` 与 `.env`，启动容器并等待健康检查通过
+—— 无需克隆仓库，也无需自行构建：
+
+```bash
+npm i -g a2wave
+a2wave setup
+```
+
 ## 快速开始（Docker）
+
+从仓库克隆并自行构建镜像：
 
 ```bash
 cp .env.example .env       # 开箱即用，无需修改
 docker compose up -d --build
+```
+
+或直接使用已发布的镜像：
+
+```bash
+docker pull ghcr.io/lilithgames/a2wave:latest
 ```
 
 访问 **http://localhost:3502**，然后创建 Agent、绑定模型 Provider 并发布。应用内手册
