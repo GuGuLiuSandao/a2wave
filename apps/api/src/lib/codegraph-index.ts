@@ -1,15 +1,12 @@
-import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { promisify } from 'node:util'
 import type { ScmSourceConfig } from '@a2wave/shared'
 import { and, eq, ne } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { scmSources } from '../db/schema.js'
+import { execCli } from '../engine/cli-spawn.js'
 import { sanitizeCredentials } from './git-sync.js'
 import { logger } from './logger.js'
-
-const execFileAsync = promisify(execFile)
 
 const CODEGRAPH_TIMEOUT_MS = 10 * 60 * 1000
 const CODEGRAPH_MAX_BUFFER = 20 * 1024 * 1024
@@ -61,7 +58,7 @@ export async function runCodegraphForPath(localPath: string): Promise<CodegraphI
   const mode = hasIndex ? 'sync' : 'init'
 
   try {
-    const { stdout, stderr } = await execFileAsync('codegraph', [mode, localPath], {
+    const { stdout, stderr } = await execCli('codegraph', [mode, localPath], {
       timeout: CODEGRAPH_TIMEOUT_MS,
       maxBuffer: CODEGRAPH_MAX_BUFFER,
       env: { ...process.env, NO_COLOR: '1' },
