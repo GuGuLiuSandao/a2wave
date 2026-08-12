@@ -98,9 +98,9 @@ CLI 会自动选择与自身版本一致的版本化镜像。升级时应继续�
 CLI 和镜像，不应写进 `$HOME/a2wave`。PostgreSQL 目前仍是实验性功能，生产环境使用前请先阅读
 [数据库后端](#数据库后端)。
 
-生成的部署会包含独立的 `a2wave-workspace` 命名卷。新建 Git 或 P4 代码源时，a2wave 会自动
-在该卷中分配托管路径，无需进入容器创建或猜测目录。需要从宿主机直接访问代码时，运维人员
-仍可通过 `A2WAVE_WORKSPACE_DIR` 改成 bind mount。
+生成的部署会包含独立的 `a2wave-workspace` 命名卷。新建 Git 代码源时，a2wave 会自动在该卷中
+分配托管路径，无需进入容器创建或猜测目录。P4 代码源则必须填写已挂载的绝对路径，并确保该路径
+被现有 P4 Client 的 `Root` 或 `AltRoots` 覆盖。
 
 > [!NOTE]
 > PostgreSQL 部署参数是在 CLI v0.7.2 之后加入的，已发布的 `a2wave@0.7.2` 包中并不包含。

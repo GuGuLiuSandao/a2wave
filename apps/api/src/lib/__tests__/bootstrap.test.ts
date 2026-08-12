@@ -183,6 +183,19 @@ describe('bootstrapFromEnv', () => {
       expect((p4Values as { name: string }).name).toBe('env:p4')
       expect((p4Values as { type: string }).type).toBe('p4')
     })
+
+    it('does not create a P4 source without an explicit client-root-covered path', async () => {
+      mockEnv.SCM_P4_PORT = 'ssl:p4.example.com:1666'
+      mockEnv.SCM_P4_USER = 'builder'
+      mockEnv.SCM_P4_CLIENT = 'builder-ws'
+      mockEnv.SCM_P4_LOCAL_PATH = ''
+
+      bootstrapFromEnv()
+      await flush()
+
+      const scmInsertCalls = vi.mocked(db.insert).mock.calls.filter((c) => c[0] === scmSources)
+      expect(scmInsertCalls).toHaveLength(0)
+    })
   })
 
   describe('bootstrapScmGit', () => {

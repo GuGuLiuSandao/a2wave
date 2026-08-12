@@ -99,8 +99,14 @@ async function bootstrapScmP4(): Promise<void> {
       .where(eq(scmSources.id, existing.id))
     logger.info({ id: existing.id }, 'Updated P4 SCM source from env')
   } else {
+    if (!env.SCM_P4_LOCAL_PATH) {
+      logger.warn(
+        'SCM_P4_LOCAL_PATH is required to create env:p4 because it must be covered by the P4 client Root or AltRoots',
+      )
+      return
+    }
     const id = createId('scm')
-    const localPath = env.SCM_P4_LOCAL_PATH || defaultScmLocalPath(id)
+    const localPath = env.SCM_P4_LOCAL_PATH
     const conflict = (
       await db.select().from(scmSources).where(eq(scmSources.localPath, localPath)).limit(1)
     )[0]

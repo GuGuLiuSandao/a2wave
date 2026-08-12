@@ -58,7 +58,7 @@ Reusable instruction set that defines agent capabilities. Skills are stored in t
 
 ## SCM Source (Source Code Management)
 
-Represents a version control repository that provides a managed working directory for Agents. Supports **Perforce P4** and **Git**. Each SCM Source persists a unique absolute `localPath`; create requests may omit it so the server allocates `SCM_STORAGE_ROOT/sources/<sourceIdSuffix>`, while an explicit absolute path remains available for operator-mounted storage.
+Represents a version control repository that provides a working directory for Agents. Supports **Perforce P4** and **Git**. Each SCM Source persists a unique absolute `localPath`; Git create requests may omit it so the server allocates `SCM_STORAGE_ROOT/sources/<sourceIdSuffix>`. P4 requires an explicit operator-mounted path covered by the existing Client `Root` or `AltRoots`.
 
 ### Initial Sync and Agent Selectability
 
@@ -98,7 +98,7 @@ When an Agent uses `workspaceType: 'scm'` and references a Git Source via `scmSo
 
 The optional SCM Source field `workspacesPath` customizes the root directory of per-run worktrees.
 
-- When left empty (`null`), it defaults to `~/.a2wave/workspaces/<sourceId underscore suffix>`; when set, all ephemeral/ttl/persistent worktrees create subdirectories by `name` under this directory.
+- When left empty (`null`), it defaults to `SCM_STORAGE_ROOT/workspaces/<sourceId underscore suffix>`; when set, all ephemeral/ttl/persistent worktrees create subdirectories by `name` under this directory. The historical `~/.a2wave/workspaces` root remains accepted for upgraded sources.
 - When creating/updating an SCM Source, `workspacesPath` accepts a string or `null`; it is an absolute path and not shared with any other Source.
 - Used to isolate large repos or move worktrees to a high-performance volume (such as an SSD).
 

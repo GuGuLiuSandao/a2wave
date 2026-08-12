@@ -2224,6 +2224,8 @@ describe('a2wave setup --upgrade under a polluted parent environment', () => {
     process.env.A2WAVE_PORT = 'notaport'
     process.env.A2WAVE_IMAGE = 'someone-elses:image'
     process.env.DATABASE_URL = 'postgres://someone-elses-db:5432/prod'
+    process.env.SCM_STORAGE_ROOT = '/someone/elses/scm'
+    process.env.SCM_WORKSPACES_ALLOWED_ROOTS = '/someone/elses/workspaces'
   })
 
   afterEach(() => {
@@ -2236,6 +2238,10 @@ describe('a2wave setup --upgrade under a polluted parent environment', () => {
     delete process.env.A2WAVE_IMAGE
     // biome-ignore lint/performance/noDelete: same — see above
     delete process.env.DATABASE_URL
+    // biome-ignore lint/performance/noDelete: same — see above
+    delete process.env.SCM_STORAGE_ROOT
+    // biome-ignore lint/performance/noDelete: same — see above
+    delete process.env.SCM_WORKSPACES_ALLOWED_ROOTS
   })
 
   it('never lets an exported DATABASE_URL reach a compose child', async () => {
@@ -2259,6 +2265,8 @@ describe('a2wave setup --upgrade under a polluted parent environment', () => {
     expect(composeCalls.length).toBeGreaterThan(0)
     for (const [, opts] of composeCalls) {
       expect(childEnv(opts).DATABASE_URL).toBeUndefined()
+      expect(childEnv(opts).SCM_STORAGE_ROOT).toBeUndefined()
+      expect(childEnv(opts).SCM_WORKSPACES_ALLOWED_ROOTS).toBeUndefined()
     }
   })
 

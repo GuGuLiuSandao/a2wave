@@ -810,6 +810,7 @@
       "storageManagedHint": "a2wave allocates a persistent path automatically. No container directory setup is required.",
       "storageCustomHint": "Use an absolute path already covered by a deployment volume mount.",
       "savedPathHint": "Resolved server path. Recreate the source to move its checkout safely.",
+      "p4LocalPathHint": "Use an absolute mounted path covered by this P4 client's Root or AltRoots.",
       "localPathRequired": "Local path is required",
       "localPathAbsolute": "Local path must be an absolute path (starting with /)",
       "workspacesPathAbsolute": "Workspaces root must be an absolute path (starting with /)",

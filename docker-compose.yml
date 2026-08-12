@@ -25,9 +25,9 @@ services:
       - "${A2WAVE_HOST_PORT:-3502}:3502"
     volumes:
       - a2wave-data:/app/data
-      # Managed SCM volume by default. Override A2WAVE_WORKSPACE_DIR with an absolute
-      # host path only when operators need to inspect the checkout from the host.
-      - ${A2WAVE_WORKSPACE_DIR:-a2wave-workspace}:/data/workspace
+      # Keep the historical host bind as the default so upgrades continue to see
+      # existing SCM checkouts. On macOS, set A2WAVE_WORKSPACE_DIR to a path under /Users.
+      - ${A2WAVE_WORKSPACE_DIR:-/data/workspace}:/data/workspace
       # Every Provider reads localSession state from the service HOME. Persist the full directory
       # to cover Cursor, Codex, OpenCode, Qoder, Trae, Copilot, Kimi, Pi, and future Provider CLIs.
       - a2wave-cli-home:/home/appuser
@@ -51,7 +51,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-/app/data/a2wave.db}
       - DATABASE_POOL_MAX=${DATABASE_POOL_MAX:-10}
       - A2WAVE_SKILLS_STORAGE=/app/data/skills
-      - SCM_STORAGE_ROOT=/data/workspace
+      - SCM_STORAGE_ROOT=${SCM_STORAGE_ROOT:-/data/workspace}
       # Runtime install root for Provider CLIs. Left empty, the image default
       # /home/appuser/.a2wave applies (already on PATH). Point it at a different mounted volume
       # and the process adds that directory to PATH at startup.
@@ -95,7 +95,7 @@ services:
       - SCM_GIT_BRANCH=${SCM_GIT_BRANCH:-main}
       - SCM_GIT_USERNAME=${SCM_GIT_USERNAME:-}
       - SCM_GIT_PAT=${SCM_GIT_PAT:-}
-      - SCM_GIT_LOCAL_PATH=${SCM_GIT_LOCAL_PATH:-/app/data/git-workspace}
+      - SCM_GIT_LOCAL_PATH=${SCM_GIT_LOCAL_PATH:-}
       - SCM_GIT_AUTO_SYNC=${SCM_GIT_AUTO_SYNC:-true}
       # Custom per-source workspacesPath values must stay under an operator-approved root.
       # /data/workspace is the dedicated bind mount declared above.
@@ -170,6 +170,5 @@ services:
 
 volumes:
   a2wave-data:
-  a2wave-workspace:
   a2wave-cli-home:
   a2wave-postgres:

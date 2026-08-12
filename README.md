@@ -111,9 +111,9 @@ image, not in `$HOME/a2wave`. PostgreSQL support is currently experimental; see
 [Database Backend](#database-backend) before using it in production.
 
 The generated deployment includes a dedicated `a2wave-workspace` volume. New Git
-and P4 sources use managed paths there automatically, so nobody needs to create or
-guess a directory inside the container. Operators can still set
-`A2WAVE_WORKSPACE_DIR` when direct host access is required.
+sources use managed paths there automatically, so nobody needs to create or guess a
+directory inside the container. P4 sources instead require an absolute mounted path
+covered by the existing P4 Client `Root` or `AltRoots`.
 
 > [!NOTE]
 > PostgreSQL setup flags were added after CLI v0.7.2 and are not present in the

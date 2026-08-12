@@ -104,6 +104,12 @@ function composeChildEnv(image: string | null, port: number | null): NodeJS.Proc
   delete env.DATABASE_URL
   // biome-ignore lint/performance/noDelete: same — see above
   delete env.POSTGRES_PASSWORD
+  // Like DATABASE_URL, these are operator-owned install settings. An exported
+  // shell value must not override the generated install's .env file.
+  // biome-ignore lint/performance/noDelete: same — see above
+  delete env.SCM_STORAGE_ROOT
+  // biome-ignore lint/performance/noDelete: same — see above
+  delete env.SCM_WORKSPACES_ALLOWED_ROOTS
   return env
 }
 

@@ -86,6 +86,7 @@ export interface P4CheckResult {
   message: string
   serverVersion?: string
   clientRoot?: string
+  clientRootWarning?: string
 }
 
 export function parseP4ClientRoots(spec: string): string[] {
@@ -149,20 +150,29 @@ export async function checkP4Connection(
     // 从 p4 info 输出中提取 Server version
     const versionMatch = stdout.match(/Server version:\s*(.+)/i)
     const serverVersion = versionMatch?.[1]?.trim()
-    const clientRoots = await getP4ClientRoots(config)
-    const clientRoot = clientRoots[0]
-
-    if (localPath && clientRoots.length > 0 && !p4ClientRootCoversPath(localPath, clientRoots)) {
-      return {
-        ok: false,
-        message: `P4 client Root does not cover local path "${localPath}". Configure Root or AltRoots to include it.`,
-        serverVersion,
-        clientRoot,
-      }
-    }
-
     // 检查是否有有效的连接
     if (stdout.includes('Server address:') || stdout.includes('Server root:')) {
+      let clientRoots: string[]
+      try {
+        clientRoots = await getP4ClientRoots(config)
+      } catch (error) {
+        const detail = sanitizeCredentials(error instanceof Error ? error.message : String(error))
+        return {
+          ok: true,
+          message: 'P4 connection is healthy',
+          serverVersion,
+          clientRootWarning: `P4 client Root could not be verified: ${detail}`,
+        }
+      }
+      const clientRoot = clientRoots[0]
+      if (localPath && clientRoots.length > 0 && !p4ClientRootCoversPath(localPath, clientRoots)) {
+        return {
+          ok: false,
+          message: `P4 client Root does not cover local path "${localPath}". Configure Root or AltRoots to include it.`,
+          serverVersion,
+          clientRoot,
+        }
+      }
       return {
         ok: true,
         message: 'P4 connection is healthy',

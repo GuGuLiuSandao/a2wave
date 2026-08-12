@@ -197,7 +197,7 @@ Evaluation runs write **no** `runs` rows. That table is a live state machine —
 - **Internal Admin API** (`/api/internal/admin/*`) is localhost-only, used by the platform-admin MCP, and **not filtered by owner** — it deliberately sees everything.
 - **OAuth channel** attachment upload/consumption is isolated per user as `oauth:<issuer>:<sub>`.
 - **Feishu connection status** (`/api/agents/feishu-connections`) reflects only the current API process; `meta.scope` states the multi-instance semantics.
-- `workspacesPath` (SCM create/update) overrides the default worktree root `~/.a2wave/workspaces/<sourceIdSuffix>`. Absolute, globally unique.
+- `workspacesPath` (SCM create/update) overrides the default worktree root `SCM_STORAGE_ROOT/workspaces/<sourceIdSuffix>`. Absolute, globally unique. The historical `~/.a2wave/workspaces` root remains allowed for upgraded sources.
 - Auth methods: [docs/agent/oauth-channel.md](./docs/agent/oauth-channel.md). Unified call-context shape: [docs/agent/run-channel-context.md](./docs/agent/run-channel-context.md).
 ## UI Conventions
 

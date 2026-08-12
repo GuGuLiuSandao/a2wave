@@ -23,6 +23,7 @@ export type P4CheckResult = {
   message: string
   serverVersion?: string
   clientRoot?: string
+  clientRootWarning?: string
   /** Populated for git sources — one entry per repo, so a failure names itself. */
   repos?: ScmRepoCheckResult[]
 }

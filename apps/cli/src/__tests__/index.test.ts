@@ -1,3 +1,4 @@
+import { runMain } from 'citty'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('citty', () => ({
@@ -13,7 +14,7 @@ vi.mock('../commands/skills.js', () => ({ skillsCommand: {} }))
 vi.mock('../commands/agents.js', () => ({ agentsCommand: {} }))
 vi.mock('../commands/runs.js', () => ({ runsCommand: {} }))
 
-const { handleError } = await import('../index.js')
+const { handleError, runCli } = await import('../index.js')
 const { CliError } = await import('../errors.js')
 const { ApiError } = await import('../client.js')
 
@@ -53,5 +54,18 @@ describe('handleError', () => {
   it('re-throws non-CliError errors', () => {
     const err = new Error('unexpected')
     expect(() => handleError(err)).toThrow('unexpected')
+  })
+})
+
+describe('runCli', () => {
+  it('prints the global version without running a nested command', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.mocked(runMain).mockClear()
+
+    runCli(['setup', '--version'])
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/^\d+\.\d+\.\d+/))
+    expect(runMain).not.toHaveBeenCalled()
+    logSpy.mockRestore()
   })
 })

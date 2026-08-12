@@ -199,6 +199,22 @@ describe('bootstrapScmP4 — update path', () => {
     expect(dbInsertRun).not.toHaveBeenCalled()
   })
 
+  it('keeps an existing P4 path when the env override is removed', async () => {
+    envMock.SCM_P4_PORT = '1666'
+    envMock.SCM_P4_USER = 'admin'
+    envMock.SCM_P4_CLIENT = 'workspace'
+    envMock.SCM_P4_LOCAL_PATH = ''
+    queueSelects({ get: { id: 'scm_existing', localPath: '/legacy/p4-client' } })
+
+    bootstrapFromEnv()
+    await flush()
+
+    expect(updateChain.set).toHaveBeenCalledWith(
+      expect.objectContaining({ localPath: '/legacy/p4-client' }),
+    )
+    expect(dbInsertRun).not.toHaveBeenCalled()
+  })
+
   it('skips when local path conflict points to a different existing row', async () => {
     envMock.SCM_P4_PORT = '1666'
     envMock.SCM_P4_USER = 'admin'

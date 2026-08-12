@@ -360,8 +360,15 @@ test('entrypoint makes a fresh managed SCM volume writable even without a UID re
   const storageRoot = entrypoint.indexOf('SCM_STORAGE_ROOT="${SCM_STORAGE_ROOT:-')
   assert.ok(storageRoot > noRemap, 'SCM ownership repair must run after both UID branches')
   assert.match(entrypoint, /mkdir -p "\$SCM_STORAGE_ROOT"/)
+  assert.match(entrypoint, /if \[ "\$\{A2WAVE_MANAGED_SCM_VOLUME:-false\}" = "true" \]; then/)
   assert.match(entrypoint, /chown -h "\$TARGET_UID:\$TARGET_GID" "\$SCM_STORAGE_ROOT"/)
   assert.match(entrypoint, /refusing to start: \$SCM_STORAGE_ROOT is a symlink/)
+})
+
+test('root Compose does not opt a host bind mount into SCM root ownership changes', () => {
+  const compose = readFileSync(resolve(root, 'docker-compose.yml'), 'utf8')
+
+  assert.doesNotMatch(compose, /A2WAVE_MANAGED_SCM_VOLUME/)
 })
 
 // ---------------------------------------------------------------------------

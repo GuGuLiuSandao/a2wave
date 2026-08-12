@@ -330,7 +330,12 @@ export const envSchema = z
     A2WAVE_MEMORY_STORAGE: z.string().default('./data/memory'),
 
     /** Root for server-managed SCM checkouts and Git worktrees. */
-    SCM_STORAGE_ROOT: stringEnv(z.string().default(path.join(DEFAULT_HOME_DIR, '.a2wave'))),
+    SCM_STORAGE_ROOT: stringEnv(
+      z
+        .string()
+        .default(path.join(DEFAULT_HOME_DIR, '.a2wave'))
+        .refine(path.isAbsolute, { message: 'SCM_STORAGE_ROOT must be an absolute path' }),
+    ),
 
     /**
      * Comma-separated absolute roots under which custom SCM workspacesPath

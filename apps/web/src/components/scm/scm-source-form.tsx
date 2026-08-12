@@ -580,6 +580,15 @@ export function ScmSourceForm({ sourceId, onSaved, onDeleted }: Props) {
             </span>
           </div>
 
+          {probeResult.clientRoot && (
+            <p className="font-mono text-xs text-muted-foreground">
+              {t('scmSources.detail.p4ClientRoot')}: {probeResult.clientRoot}
+            </p>
+          )}
+          {probeResult.clientRootWarning && (
+            <p className="text-xs text-warning">{probeResult.clientRootWarning}</p>
+          )}
+
           {/* Per-repo breakdown: the aggregate message only counts passes, so this
               is what tells you which repo failed and why. Gated on multi-repo mode
               rather than on the count — a one-repo multi-repo source aggregates to
@@ -634,7 +643,13 @@ export function ScmSourceForm({ sourceId, onSaved, onDeleted }: Props) {
             <Label required>{t('scmSources.detail.sourceTypeLabel')}</Label>
             <Segmented
               value={scmType}
-              onChange={(v) => setScmType(v as ScmType)}
+              onChange={(v) => {
+                const nextType = v as ScmType
+                setScmType(nextType)
+                setValue('storageMode', nextType === 'git' ? 'managed' : 'custom', {
+                  shouldDirty: true,
+                })
+              }}
               options={[
                 {
                   value: 'git',
@@ -701,17 +716,29 @@ export function ScmSourceForm({ sourceId, onSaved, onDeleted }: Props) {
               <Label htmlFor="localPath">{t('scmSources.detail.localPathLabel')}</Label>
               <Input
                 id="localPath"
-                readOnly
-                className="font-mono text-sm bg-muted"
-                {...register('localPath')}
+                readOnly={source?.type === 'git'}
+                className={cn('font-mono text-sm', source?.type === 'git' && 'bg-muted')}
+                {...register('localPath', {
+                  required:
+                    source?.type === 'p4' ? t('scmSources.detail.localPathRequired') : false,
+                  validate: (value) =>
+                    source?.type !== 'p4' ||
+                    isAbsolutePath(value) ||
+                    t('scmSources.detail.localPathAbsolute'),
+                })}
               />
               <p className="text-xs text-muted-foreground">
-                {t('scmSources.detail.savedPathHint')}
+                {source?.type === 'p4'
+                  ? t('scmSources.detail.p4LocalPathHint')
+                  : t('scmSources.detail.savedPathHint')}
               </p>
+              {errors.localPath && (
+                <p className="text-xs text-destructive">{errors.localPath.message}</p>
+              )}
             </div>
           )}
         </div>
-        {isCreateMode && (
+        {isCreateMode && scmType === 'git' && (
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium leading-none text-foreground">
               {t('scmSources.detail.storageModeLabel')}
@@ -807,6 +834,29 @@ export function ScmSourceForm({ sourceId, onSaved, onDeleted }: Props) {
               </div>
             </div>
           </fieldset>
+        )}
+        {isCreateMode && scmType === 'p4' && (
+          <div className="space-y-2">
+            <Label htmlFor="localPath" required>
+              {t('scmSources.detail.localPathLabel')}
+            </Label>
+            <Input
+              id="localPath"
+              placeholder="/data/workspace/p4-client"
+              className="font-mono text-sm"
+              {...register('localPath', {
+                required: t('scmSources.detail.localPathRequired'),
+                validate: (value) =>
+                  isAbsolutePath(value) || t('scmSources.detail.localPathAbsolute'),
+              })}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t('scmSources.detail.p4LocalPathHint')}
+            </p>
+            {errors.localPath && (
+              <p className="text-xs text-destructive">{errors.localPath.message}</p>
+            )}
+          </div>
         )}
         <div className="space-y-2">
           <Label htmlFor="description">{t('scmSources.detail.descriptionLabel')}</Label>
@@ -1253,6 +1303,9 @@ export function ScmSourceForm({ sourceId, onSaved, onDeleted }: Props) {
             <p className="pl-6 font-mono text-xs text-muted-foreground">
               {t('scmSources.detail.p4ClientRoot')}: {checkSource.data.data.clientRoot}
             </p>
+          )}
+          {checkSource.data.data.clientRootWarning && (
+            <p className="pl-6 text-xs text-warning">{checkSource.data.data.clientRootWarning}</p>
           )}
         </div>
       )}

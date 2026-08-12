@@ -329,8 +329,12 @@ export function buildComposeFile(input: ComposeFileInput): string {
     // DATABASE_URL added to .env silently inert.
     '      - DATABASE_URL=${DATABASE_URL:-/app/data/a2wave.db}',
     '      - A2WAVE_SKILLS_STORAGE=/app/data/skills',
-    '      - SCM_STORAGE_ROOT=/data/workspace',
-    '      - SCM_WORKSPACES_ALLOWED_ROOTS=/data/workspace',
+    '      - SCM_STORAGE_ROOT=${SCM_STORAGE_ROOT:-/data/workspace}',
+    '      - SCM_WORKSPACES_ALLOWED_ROOTS=${SCM_WORKSPACES_ALLOWED_ROOTS:-/data/workspace}',
+    // Internal ownership policy: generated installs always use the named SCM
+    // volume below. The repository-root Compose deliberately omits this for its
+    // backward-compatible host bind mount.
+    '      - A2WAVE_MANAGED_SCM_VOLUME=true',
     '    volumes:',
     '      - a2wave-data:/app/data',
     '      - a2wave-workspace:/data/workspace',

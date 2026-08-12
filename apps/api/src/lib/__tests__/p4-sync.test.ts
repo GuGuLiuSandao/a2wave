@@ -1255,4 +1255,36 @@ describe('checkP4Connection — edge cases', () => {
     expect(result.ok).toBe(false)
     expect(result.message).toContain('Connection refused')
   })
+
+  it('keeps a healthy connection when the client spec cannot be read', async () => {
+    makeSpawnMock(0)
+    mockExecFile.mockImplementation((...args: unknown[]) => {
+      const commandArgs = args[1] as string[]
+      const cb = args[args.length - 1] as (
+        err: Error | null,
+        result?: { stdout: string; stderr: string },
+      ) => void
+      if (commandArgs[0] === 'info') {
+        cb(null, {
+          stdout: 'Server address: p4.example.com:1666\nServer version: P4D/LINUX/2025.1',
+          stderr: '',
+        })
+        return
+      }
+      cb(new Error('P4PASSWD=hunter2: permission denied for client -o'))
+    })
+
+    const result = await checkP4Connection({
+      ...p4ConfigDefaults,
+      p4port: 'ssl:p4.example.com:1666',
+      p4user: 'builder',
+      p4passwd: 'hunter2',
+      p4client: 'builder-client',
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.message).toBe('P4 connection is healthy')
+    expect(result.clientRootWarning).toContain('could not be verified')
+    expect(result.clientRootWarning).not.toContain('hunter2')
+  })
 })

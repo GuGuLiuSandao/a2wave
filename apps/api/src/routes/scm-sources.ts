@@ -164,6 +164,13 @@ app.post('/', async (c) => {
     return c.json({ error: 'Source type does not match config type' }, 400)
   }
 
+  if (parsed.data.type === 'p4' && !parsed.data.localPath) {
+    return c.json(
+      { error: 'P4 sources require a localPath covered by the client Root or AltRoots' },
+      400,
+    )
+  }
+
   const { workspacesPath } = parsed.data
   const id = createId('scm')
   const localPath = parsed.data.localPath ?? defaultScmLocalPath(id)

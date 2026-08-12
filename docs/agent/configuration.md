@@ -47,12 +47,13 @@ exception; see `AUTH_SECRET`.
 
 ## macOS Docker Desktop
 
-The default SCM storage is a Docker named volume and needs no macOS file-sharing
-setup. These overrides apply only when an operator deliberately uses host bind mounts.
+CLI-generated installs use a Docker named volume and need no macOS file-sharing
+setup. The repository-root `docker-compose.yml` keeps its historical host bind default
+for upgrade compatibility; on macOS, point it at a directory under `/Users`.
 
 | Variable | Description |
 |------|------|
-| `A2WAVE_WORKSPACE_DIR` | Optional host directory replacing the named volume, e.g. `$HOME/a2wave-workspace` |
+| `A2WAVE_WORKSPACE_DIR` | Host directory used by the repository-root Compose deployment, e.g. `$HOME/a2wave-workspace` |
 | `A2WAVE_RUN_AS_UID` | UID the container process runs as, e.g. `10001` |
 | `A2WAVE_RUN_AS_GID` | GID the container process runs as, e.g. `10001` |
 
@@ -69,7 +70,7 @@ Bootstrap a Git or Perforce checkout from the environment on first boot.
 | `SCM_P4_PASSWD` | P4 password |
 | `SCM_P4_CLIENT` | P4 Workspace name |
 | `SCM_P4_DEPOT_PATH` | Depot path, e.g. `//depot/main/...` |
-| `SCM_P4_LOCAL_PATH` | Optional sync directory; empty allocates a managed path under `SCM_STORAGE_ROOT/sources` |
+| `SCM_P4_LOCAL_PATH` | Required for a new env-seeded P4 source; absolute mounted path covered by the P4 Client `Root` or `AltRoots` (repository-root Compose defaults it to `/data/workspace/main`). Existing `env:p4` rows retain their saved path when this is empty |
 | `SCM_P4_AUTO_SYNC` | Whether to auto-sync, defaults to `true` |
 
 ### Git SCM source (created automatically once the URL is set)

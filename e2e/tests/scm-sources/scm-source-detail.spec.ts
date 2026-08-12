@@ -69,7 +69,7 @@ test.describe('SCM Source managed storage', () => {
       await page.goto(ROUTES.scmSources)
       await page.getByRole('button', { name: /创建代码源|Create Source/ }).click()
       const dialog = page.getByRole('dialog')
-      await expect(dialog.getByText(/托管存储（推荐）|Managed storage/)).toBeVisible()
+      await expect(dialog.getByRole('radio', { name: /托管存储|Managed storage/ })).toBeVisible()
       await expect(dialog.getByLabel(/本地路径|Local Path/)).toHaveCount(0)
       await dialog.getByLabel(/^名称|^Name/).fill(name)
       await dialog.getByLabel(/仓库地址|Repository URL/).fill('https://github.com/example/repo.git')

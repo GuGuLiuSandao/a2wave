@@ -1,7 +1,8 @@
 import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { env } from '../../env.js'
 import {
   getDefaultScmWorkspacesAllowedRoot,
   validateScmWorkspacesRoot,
@@ -19,6 +20,17 @@ describe('validateScmWorkspacesRoot', () => {
     const defaultRoot = getDefaultScmWorkspacesAllowedRoot()
 
     expect(validateScmWorkspacesRoot(join(defaultRoot, 'scm-source'), '')).toBeNull()
+  })
+
+  it('keeps the pre-managed-storage default root allowed after an upgrade', async () => {
+    const legacyRoot = join(homedir(), '.a2wave', 'workspaces')
+    const originalStorageRoot = env.SCM_STORAGE_ROOT
+    env.SCM_STORAGE_ROOT = '/data/workspace'
+    try {
+      expect(validateScmWorkspacesRoot(join(legacyRoot, 'legacy-source'), '')).toBeNull()
+    } finally {
+      env.SCM_STORAGE_ROOT = originalStorageRoot
+    }
   })
 
   it('rejects an arbitrary absolute path outside approved roots', async () => {
@@ -102,6 +114,25 @@ describe('validateScmWorkspacesRoot', () => {
         false,
       ),
     ).toMatch(/Unsafe saved workspacesPath.*approved dedicated root/)
+  })
+
+  it('keeps a non-admin source on the historical default root usable after an upgrade', async () => {
+    const originalStorageRoot = env.SCM_STORAGE_ROOT
+    env.SCM_STORAGE_ROOT = '/data/workspace'
+    try {
+      expect(
+        await validateStoredScmWorkspacesRoot(
+          {
+            id: 'scm_legacy_default',
+            workspacesPath: join(homedir(), '.a2wave', 'workspaces', 'legacy-source'),
+            userId: 'usr_user',
+          },
+          false,
+        ),
+      ).toBeNull()
+    } finally {
+      env.SCM_STORAGE_ROOT = originalStorageRoot
+    }
   })
 
   it('keeps an active admin-owned dedicated custom root compatible', async () => {

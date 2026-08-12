@@ -160,8 +160,12 @@ describe('buildComposeFile', () => {
   it('persists managed SCM checkouts in a dedicated named volume', () => {
     const compose = buildComposeFile({ image, port: DEFAULT_PORT })
     expect(compose).toContain('a2wave-workspace:/data/workspace')
-    expect(compose).toContain('SCM_STORAGE_ROOT=/data/workspace')
-    expect(compose).toContain('SCM_WORKSPACES_ALLOWED_ROOTS=/data/workspace')
+    expect(compose).toContain('A2WAVE_MANAGED_SCM_VOLUME=true')
+    expect(compose).toContain('SCM_STORAGE_ROOT=${SCM_STORAGE_ROOT:-/data/workspace}')
+    expect(compose).toContain(
+      'SCM_WORKSPACES_ALLOWED_ROOTS=${SCM_WORKSPACES_ALLOWED_ROOTS:-/data/workspace}',
+    )
+    expect(compose).not.toContain('SCM_STORAGE_ROOT=/data/workspace')
     expect(compose).toMatch(/volumes:\n(?:.|\n)* {2}a2wave-workspace:/)
   })
 

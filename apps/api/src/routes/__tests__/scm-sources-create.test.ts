@@ -133,6 +133,26 @@ describe('POST /scm-sources — credential normalization', () => {
     expect(insertedValues.current?.localPath).not.toBe(insertedValues.current?.workspacesPath)
   })
 
+  it('requires P4 sources to use a client-root-covered local path', async () => {
+    const app = await buildApp()
+    const res = await create(app, {
+      name: 'P4 depot',
+      type: 'p4',
+      config: {
+        type: 'p4',
+        p4port: 'ssl:p4.example.com:1666',
+        p4user: 'builder',
+        p4client: 'builder-client',
+      },
+    })
+
+    expect(res.status).toBe(400)
+    await expect(res.json()).resolves.toEqual({
+      error: 'P4 sources require a localPath covered by the client Root or AltRoots',
+    })
+    expect(insertedValues.current).toBeUndefined()
+  })
+
   it('starts the initial sync immediately when auto-sync is enabled', async () => {
     const app = await buildApp()
     const res = await create(app, {

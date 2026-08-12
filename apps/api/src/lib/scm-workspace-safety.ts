@@ -1,4 +1,5 @@
 import { existsSync, realpathSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { SETTINGS_DEFAULTS } from '@a2wave/shared'
 import { eq } from 'drizzle-orm'
@@ -58,6 +59,10 @@ export function getDefaultScmWorkspacesAllowedRoot(): string {
   return join(env.SCM_STORAGE_ROOT, 'workspaces')
 }
 
+function getLegacyScmWorkspacesAllowedRoot(): string {
+  return join(homedir(), '.a2wave', 'workspaces')
+}
+
 function getProtectedPlatformPaths(): string[] {
   return [
     env.DATABASE_URL,
@@ -87,7 +92,11 @@ export function validateScmWorkspacesRoot(
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean)
-  const allowedRoots = [getDefaultScmWorkspacesAllowedRoot(), ...configuredRoots]
+  const allowedRoots = [
+    getDefaultScmWorkspacesAllowedRoot(),
+    getLegacyScmWorkspacesAllowedRoot(),
+    ...configuredRoots,
+  ]
     .filter(isAbsolute)
     .map((root) => canonicalizeThroughExistingAncestor(root))
 

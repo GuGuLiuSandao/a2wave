@@ -810,6 +810,7 @@
       "storageManagedHint": "a2wave 会自动分配持久化路径，无需进入容器创建目录。",
       "storageCustomHint": "请输入已被部署持久卷覆盖的容器内绝对路径。",
       "savedPathHint": "这是服务端最终路径；如需安全迁移 checkout，请重新创建代码源。",
+      "p4LocalPathHint": "请输入该 P4 Client 的 Root 或 AltRoots 覆盖的已挂载绝对路径。",
       "localPathRequired": "请输入本地路径",
       "localPathAbsolute": "本地路径必须是绝对路径（以 / 开头）",
       "workspacesPathAbsolute": "Workspaces 根目录必须是绝对路径（以 / 开头）",

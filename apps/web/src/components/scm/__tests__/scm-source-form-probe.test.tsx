@@ -46,6 +46,18 @@ const MULTI_REPO_SOURCE = {
     repos: [{ repoUrl: 'https://example.com/a.git', branch: 'main', directory: '' }],
   },
 }
+const P4_SOURCE = {
+  ...GIT_SOURCE,
+  type: 'p4',
+  localPath: '/data/p4/client',
+  config: {
+    type: 'p4',
+    p4port: 'ssl:p4.example.com:1666',
+    p4user: 'builder',
+    p4passwd: '********',
+    p4client: 'builder-client',
+  },
+}
 
 /**
  * `useScmSource`'s result feeds a `useEffect([source, reset])` that resets the
@@ -55,6 +67,7 @@ const MULTI_REPO_SOURCE = {
  */
 const GIT_RESULT = { data: GIT_SOURCE, isPending: false, error: null }
 const MULTI_REPO_RESULT = { data: MULTI_REPO_SOURCE, isPending: false, error: null }
+const P4_RESULT = { data: P4_SOURCE, isPending: false, error: null }
 const EMPTY_RESULT = { data: undefined, isPending: false, error: null }
 
 const probeMock = vi.fn(idleMutation)
@@ -135,6 +148,26 @@ describe('ScmSourceForm — connection probe', () => {
     expect(customStorageRow).not.toBeNull()
     expect(screen.getByLabelText(/^Local Path/i)).toBeInTheDocument()
     expect(customStorageRow).toContainElement(screen.getByLabelText(/^Local Path/i))
+  })
+
+  it('requires a custom local path for a new P4 source', async () => {
+    sourceMock.mockImplementation(() => EMPTY_RESULT as never)
+    const user = userEvent.setup()
+    renderForm(undefined)
+
+    await user.click(screen.getByText('Perforce (P4)'))
+
+    expect(screen.queryByText(/Managed storage/i)).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/^Local Path/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /^Create$/i }))
+    expect(screen.getByText('Local path is required')).toBeInTheDocument()
+  })
+
+  it('allows an existing P4 source path to be repaired in place', () => {
+    sourceMock.mockImplementation(() => P4_RESULT as never)
+    renderForm('scm_p4')
+
+    expect(screen.getByLabelText(/^Local Path/i)).not.toHaveAttribute('readonly')
   })
 
   it('offers the probe button in create mode, before a source exists', () => {
@@ -317,6 +350,26 @@ describe('ScmSourceForm — connection probe', () => {
     renderForm('scm_1')
 
     expect(screen.getByText(/2\/2 repos connected/i)).toBeInTheDocument()
+  })
+
+  it('shows the detected P4 root and a separate verification warning', () => {
+    sourceMock.mockImplementation(() => P4_RESULT as never)
+    probeMock.mockImplementation(() => ({
+      ...idleMutation(),
+      data: {
+        data: {
+          ok: true,
+          message: 'P4 connection is healthy',
+          clientRoot: '/data/p4/client',
+          clientRootWarning: 'P4 client Root could not be verified',
+        },
+      },
+    }))
+
+    renderForm('scm_p4')
+
+    expect(screen.getByText(/P4 Client Root: \/data\/p4\/client/)).toBeInTheDocument()
+    expect(screen.getByText(/could not be verified/)).toBeInTheDocument()
   })
 
   it('surfaces a rejected probe request rather than failing silently', () => {

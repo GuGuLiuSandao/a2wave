@@ -109,7 +109,9 @@ if [ ! -d "$SCM_STORAGE_ROOT" ] || [ -L "$SCM_STORAGE_ROOT" ]; then
   echo "[entrypoint] refusing to start: $SCM_STORAGE_ROOT is not a regular directory" >&2
   exit 1
 fi
-chown -h "$TARGET_UID:$TARGET_GID" "$SCM_STORAGE_ROOT"
+if [ "${A2WAVE_MANAGED_SCM_VOLUME:-false}" = "true" ]; then
+  chown -h "$TARGET_UID:$TARGET_GID" "$SCM_STORAGE_ROOT"
+fi
 
 # Runtime install root for Provider CLIs (see the A2WAVE_CLI_INSTALL_ROOT comment in the Dockerfile).
 # These are chowned here rather than relying on the ownership repair below: that block is guarded by
