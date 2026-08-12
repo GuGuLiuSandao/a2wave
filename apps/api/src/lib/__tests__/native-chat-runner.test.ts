@@ -132,6 +132,43 @@ describe('reserveNativeChatRun', () => {
     })
   })
 
+  it('persists pre-staged QQ attachment refs without a signed vendor URL', async () => {
+    mockTryAcquireSlot.mockReturnValue('queued')
+    mockAgentGet.mockReturnValue({
+      id: 'agt_1',
+      userId: 'usr_1',
+      publishStatus: 'published',
+      publishChannels: ['qq_official'],
+      maxConcurrency: 2,
+    })
+    const attachments = [
+      {
+        token: 'att_internal',
+        name: 'report.pdf',
+        mimeType: 'application/pdf',
+        size: 42,
+      },
+    ]
+
+    await reserveNativeChatRun({
+      agentId: 'agt_1',
+      source: 'qq_official',
+      eventId: 'qq_official:message-1',
+      conversationId: 'app:c2c:user',
+      intent: 'review this file',
+      channel: slackChannel,
+      attachments,
+      attachmentConsumerId: 'agent:agt_1',
+    })
+
+    expect(insertedRunValues[0]?.executionMetadata).toEqual({
+      nativeChatContext: { channel: slackChannel },
+      attachments,
+      attachmentConsumerId: 'agent:agt_1',
+    })
+    expect(JSON.stringify(insertedRunValues[0])).not.toContain('https://')
+  })
+
   it('keeps a queued run durable without executing it immediately', async () => {
     mockTryAcquireSlot.mockReturnValue('queued')
 

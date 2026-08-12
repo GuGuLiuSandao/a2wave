@@ -1,4 +1,9 @@
-import type { RunChannelContextDiscord, RunChannelContextSlack } from '@a2wave/shared'
+import type {
+  AttachmentRef,
+  RunChannelContextDiscord,
+  RunChannelContextQQOfficial,
+  RunChannelContextSlack,
+} from '@a2wave/shared'
 import { eq } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { agents, runs } from '../db/schema.js'
@@ -7,19 +12,23 @@ import { tryAcquireSlot } from '../engine/task-queue.js'
 import { executeChatRun } from './execute-chat-run.js'
 import { createId } from './id.js'
 import { logger } from './logger.js'
-import type { NativeChatAttachment } from './native-chat-attachments.js'
+import type {
+  NativeChatAttachment,
+  PersistedNativeChatAttachment,
+} from './native-chat-attachments.js'
 
-export type NativeChatSource = 'slack' | 'discord'
-
+export type NativeChatSource = 'slack' | 'discord' | 'qq_official'
 export interface ReserveNativeChatRunInput {
   agentId: string
   source: NativeChatSource
   eventId: string
   conversationId: string
   intent: string
-  channel: RunChannelContextSlack | RunChannelContextDiscord
+  channel: RunChannelContextSlack | RunChannelContextDiscord | RunChannelContextQQOfficial
   displayName?: string | null
-  nativeAttachments?: NativeChatAttachment[]
+  nativeAttachments?: PersistedNativeChatAttachment[]
+  attachments?: AttachmentRef[]
+  attachmentConsumerId?: string
 }
 
 export type ReserveNativeChatRunResult =
@@ -88,6 +97,12 @@ export async function reserveNativeChatRun(
       triggerUserName: input.displayName ?? null,
       executionMetadata: {
         nativeChatContext: { channel: input.channel },
+        ...(input.attachments && input.attachments.length > 0
+          ? {
+              attachments: input.attachments,
+              attachmentConsumerId: input.attachmentConsumerId ?? `agent:${input.agentId}`,
+            }
+          : {}),
         ...(input.nativeAttachments && input.nativeAttachments.length > 0
           ? { nativeAttachments: input.nativeAttachments }
           : {}),

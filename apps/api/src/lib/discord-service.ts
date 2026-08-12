@@ -61,7 +61,7 @@ function canReuseDiscordGatewayConnection(
 
 export function extractDiscordNativeAttachments(
   message: DiscordMessageSnapshot,
-): NativeChatAttachment[] {
+): Extract<NativeChatAttachment, { source: 'discord' }>[] {
   return (message.attachments ?? []).map((attachment) => ({
     source: 'discord' as const,
     remoteId: attachment.id,

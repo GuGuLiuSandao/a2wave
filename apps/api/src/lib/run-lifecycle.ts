@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import {
   type RunChannelContextDiscord,
+  type RunChannelContextQQOfficial,
   type RunChannelContextSlack,
   artifactPolicySchema,
 } from '@a2wave/shared'
@@ -328,17 +329,35 @@ function sendNativeChatReplyByContext(
   output: string | undefined,
   artifacts: RegisteredArtifact[] = [],
 ): void {
-  const channel = context?.channel as RunChannelContextSlack | RunChannelContextDiscord | undefined
-  if (channel?.channel_type !== 'slack' && channel?.channel_type !== 'discord') return
+  const channel = context?.channel as
+    | RunChannelContextSlack
+    | RunChannelContextDiscord
+    | RunChannelContextQQOfficial
+    | undefined
+  if (
+    channel?.channel_type !== 'slack' &&
+    channel?.channel_type !== 'discord' &&
+    channel?.channel_type !== 'qq_official'
+  )
+    return
   const replyText = output?.trim() ? output : buildNativeChatFallbackText(runId)
   const send =
     channel.channel_type === 'slack'
       ? import('./slack-service.js').then(({ slackConnectionManager }) =>
           slackConnectionManager.sendRunResultByContext(agentId, channel, replyText, artifacts),
         )
-      : import('./discord-service.js').then(({ discordConnectionManager }) =>
-          discordConnectionManager.sendRunResultByContext(agentId, channel, replyText, artifacts),
-        )
+      : channel.channel_type === 'discord'
+        ? import('./discord-service.js').then(({ discordConnectionManager }) =>
+            discordConnectionManager.sendRunResultByContext(agentId, channel, replyText, artifacts),
+          )
+        : import('./qq-official-service.js').then(({ qqOfficialConnectionManager }) =>
+            qqOfficialConnectionManager.sendRunResultByContext(
+              agentId,
+              channel,
+              replyText,
+              artifacts,
+            ),
+          )
   void send.catch((err) =>
     logger.warn(
       { err, runId, agentId, channel: channel.channel_type },

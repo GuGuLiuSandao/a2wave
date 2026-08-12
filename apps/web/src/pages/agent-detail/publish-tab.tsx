@@ -15,6 +15,7 @@ import type {
   DiscordPublishConfig,
   FeishuPublishConfig,
   PublishConfig,
+  QQOfficialPublishConfig,
   SaveChannelConfigVars,
   SchedulePublishConfig,
   SlackPublishConfig,
@@ -72,6 +73,7 @@ import {
   resolveGitTriggerIntentDefault,
 } from './publish/git-trigger-channel-section'
 import { OauthAllowedEmails } from './publish/oauth-allowed-emails'
+import { QQOfficialChannelSection } from './publish/qq-official-channel-section'
 import { ScheduleChannelSection } from './publish/schedule-channel-section'
 
 /** Local draft shape for one git-trigger channel's form state. */
@@ -378,6 +380,9 @@ export function PublishTab({
   const [feishuEnabled, setFeishuEnabled] = useState(() => channelInitiallyOn('feishu'))
   const [slackEnabled, setSlackEnabled] = useState(() => channelInitiallyOn('slack'))
   const [discordEnabled, setDiscordEnabled] = useState(() => channelInitiallyOn('discord'))
+  const [qqOfficialEnabled, setQQOfficialEnabled] = useState(() =>
+    channelInitiallyOn('qq_official'),
+  )
   // 明文 API Key 仅在「生成/重置」成功响应里一次性返回，存这里用于弹 modal 展示，关闭即清空。
   const [generatedKey, setGeneratedKey] = useState<string | null>(null)
   const [authType, setAuthType] = useState<'none' | 'api_key'>('api_key')
@@ -468,6 +473,22 @@ export function PublishTab({
   )
   const [discordDmReplyMode, setDiscordDmReplyMode] = useState<'reply' | 'none'>('reply')
   const [discordSendArtifactsAsFile, setDiscordSendArtifactsAsFile] = useState(true)
+
+  // QQ Official WebSocket Gateway config state.
+  const [qqOfficialAppId, setQQOfficialAppId] = useState(() => agent?.qqOfficialConfig?.appId ?? '')
+  const [qqOfficialAppSecret, setQQOfficialAppSecret] = useState(
+    () => agent?.qqOfficialConfig?.appSecret ?? '',
+  )
+  const [qqEnableGroupAndC2c, setQQEnableGroupAndC2c] = useState(true)
+  const [qqEnableGuildMessages, setQQEnableGuildMessages] = useState(true)
+  const [qqEnableGuildDirectMessages, setQQEnableGuildDirectMessages] = useState(true)
+  const [qqGroupTriggerOnAt, setQQGroupTriggerOnAt] = useState(true)
+  const [qqGroupTriggerOnNewMessage, setQQGroupTriggerOnNewMessage] = useState(false)
+  const [qqGroupReplyMode, setQQGroupReplyMode] = useState<'reply' | 'new' | 'none'>('reply')
+  const [qqC2cReplyMode, setQQC2cReplyMode] = useState<'reply' | 'new' | 'none'>('reply')
+  const [qqGuildReplyMode, setQQGuildReplyMode] = useState<'reply' | 'new' | 'none'>('reply')
+  const [qqGuildDmReplyMode, setQQGuildDmReplyMode] = useState<'reply' | 'new' | 'none'>('reply')
+  const [qqSendArtifactsAsFile, setQQSendArtifactsAsFile] = useState(true)
 
   // Chat app config state (presentation copy only — no credentials)
   const [chatAppEnabled, setChatAppEnabled] = useState(() => channelInitiallyOn('chat_app'))
@@ -635,6 +656,7 @@ export function PublishTab({
     feishu: !!agent?.feishuConfig,
     slack: !!agent?.slackConfig,
     discord: !!agent?.discordConfig,
+    qq_official: !!agent?.qqOfficialConfig,
   }
 
   // Live socket state for the Feishu / Slack / Discord cards. Polling is gated:
@@ -644,6 +666,7 @@ export function PublishTab({
     persistedChannelConfigured.feishu ||
     persistedChannelConfigured.slack ||
     persistedChannelConfigured.discord ||
+    persistedChannelConfigured.qq_official ||
     !!agent?.publishChannels?.some(isConnectedChannel)
   const {
     connections: chatConnections,
@@ -750,6 +773,7 @@ export function PublishTab({
       setFeishuEnabled(channels.includes('feishu'))
       setSlackEnabled(channels.includes('slack'))
       setDiscordEnabled(channels.includes('discord'))
+      setQQOfficialEnabled(channels.includes('qq_official'))
       setScheduleEnabled(channels.includes('schedule'))
       setScheduleRunAsOwner(Boolean(agent.scheduleRunAsOwner))
       setOauthEnabled(channels.includes('oauth'))
@@ -840,6 +864,22 @@ export function PublishTab({
         setDiscordSendArtifactsAsFile(savedDiscord.sendArtifactsAsFile ?? true)
       }
 
+      const savedQQOfficial = agent.qqOfficialConfig
+      if (savedQQOfficial) {
+        setQQOfficialAppId(savedQQOfficial.appId)
+        setQQOfficialAppSecret(savedQQOfficial.appSecret)
+        setQQEnableGroupAndC2c(savedQQOfficial.enableGroupAndC2c ?? true)
+        setQQEnableGuildMessages(savedQQOfficial.enableGuildMessages ?? true)
+        setQQEnableGuildDirectMessages(savedQQOfficial.enableGuildDirectMessages ?? true)
+        setQQGroupTriggerOnAt(savedQQOfficial.groupTriggerOnAt ?? true)
+        setQQGroupTriggerOnNewMessage(savedQQOfficial.groupTriggerOnNewMessage ?? false)
+        setQQGroupReplyMode(savedQQOfficial.groupReplyMode ?? 'reply')
+        setQQC2cReplyMode(savedQQOfficial.c2cReplyMode ?? 'reply')
+        setQQGuildReplyMode(savedQQOfficial.guildReplyMode ?? 'reply')
+        setQQGuildDmReplyMode(savedQQOfficial.guildDmReplyMode ?? 'reply')
+        setQQSendArtifactsAsFile(savedQQOfficial.sendArtifactsAsFile ?? true)
+      }
+
       // Hydrate unconditionally, falling back to defaults when the stored config is
       // null. Guarding on truthiness left the previous copy in the form after the
       // channel was disabled (which clears the column), so re-enabling it without
@@ -883,6 +923,7 @@ export function PublishTab({
     feishuEnabled: (v) => setFeishuEnabled(v as boolean),
     slackEnabled: (v) => setSlackEnabled(v as boolean),
     discordEnabled: (v) => setDiscordEnabled(v as boolean),
+    qqOfficialEnabled: (v) => setQQOfficialEnabled(v as boolean),
     chatAppEnabled: (v) => setChatAppEnabled(v as boolean),
     chatAppDisplayName: (v) => setChatAppDisplayName(v as string),
     chatAppWelcomeMessage: (v) => setChatAppWelcomeMessage(v as string),
@@ -931,6 +972,17 @@ export function PublishTab({
     discordGuildTriggerOnNewMessage: (v) => setDiscordGuildTriggerOnNewMessage(v as boolean),
     discordGuildReplyMode: (v) => setDiscordGuildReplyMode(v as 'reply' | 'new' | 'none'),
     discordDmReplyMode: (v) => setDiscordDmReplyMode(v as 'reply' | 'none'),
+    qqOfficialAppId: (v) => setQQOfficialAppId(v as string),
+    qqEnableGroupAndC2c: (v) => setQQEnableGroupAndC2c(v as boolean),
+    qqEnableGuildMessages: (v) => setQQEnableGuildMessages(v as boolean),
+    qqEnableGuildDirectMessages: (v) => setQQEnableGuildDirectMessages(v as boolean),
+    qqGroupTriggerOnAt: (v) => setQQGroupTriggerOnAt(v as boolean),
+    qqGroupTriggerOnNewMessage: (v) => setQQGroupTriggerOnNewMessage(v as boolean),
+    qqGroupReplyMode: (v) => setQQGroupReplyMode(v as 'reply' | 'new' | 'none'),
+    qqC2cReplyMode: (v) => setQQC2cReplyMode(v as 'reply' | 'new' | 'none'),
+    qqGuildReplyMode: (v) => setQQGuildReplyMode(v as 'reply' | 'new' | 'none'),
+    qqGuildDmReplyMode: (v) => setQQGuildDmReplyMode(v as 'reply' | 'new' | 'none'),
+    qqSendArtifactsAsFile: (v) => setQQSendArtifactsAsFile(v as boolean),
     scheduleConfigs: (v) => {
       const configs = normalizeSchedulePublishConfigs(
         v as SchedulePublishConfig | SchedulePublishConfig[] | null,
@@ -965,6 +1017,7 @@ export function PublishTab({
     feishuEnabled,
     slackEnabled,
     discordEnabled,
+    qqOfficialEnabled,
     chatAppEnabled,
     chatAppDisplayName,
     chatAppWelcomeMessage,
@@ -1011,6 +1064,17 @@ export function PublishTab({
     discordGuildTriggerOnNewMessage,
     discordGuildReplyMode,
     discordDmReplyMode,
+    qqOfficialAppId,
+    qqEnableGroupAndC2c,
+    qqEnableGuildMessages,
+    qqEnableGuildDirectMessages,
+    qqGroupTriggerOnAt,
+    qqGroupTriggerOnNewMessage,
+    qqGroupReplyMode,
+    qqC2cReplyMode,
+    qqGuildReplyMode,
+    qqGuildDmReplyMode,
+    qqSendArtifactsAsFile,
     scheduleConfigs,
     activeScheduleIndex,
     scheduleMode,
@@ -1074,6 +1138,7 @@ export function PublishTab({
     if (feishuEnabled) channels.push('feishu')
     if (slackEnabled) channels.push('slack')
     if (discordEnabled) channels.push('discord')
+    if (qqOfficialEnabled) channels.push('qq_official')
     if (scheduleEnabled) channels.push('schedule')
     if (oauthEnabled) channels.push('oauth')
     if (chatAppEnabled) channels.push('chat_app')
@@ -1162,6 +1227,21 @@ export function PublishTab({
     sendArtifactsAsFile: discordSendArtifactsAsFile,
   })
 
+  const buildQQOfficialConfig = (): QQOfficialPublishConfig => ({
+    appId: qqOfficialAppId.trim(),
+    appSecret: qqOfficialAppSecret,
+    enableGroupAndC2c: qqEnableGroupAndC2c,
+    enableGuildMessages: qqEnableGuildMessages,
+    enableGuildDirectMessages: qqEnableGuildDirectMessages,
+    groupTriggerOnAt: qqGroupTriggerOnAt,
+    groupTriggerOnNewMessage: qqGroupTriggerOnNewMessage,
+    groupReplyMode: qqGroupReplyMode,
+    c2cReplyMode: qqC2cReplyMode,
+    guildReplyMode: qqGuildReplyMode,
+    guildDmReplyMode: qqGuildDmReplyMode,
+    sendArtifactsAsFile: qqSendArtifactsAsFile,
+  })
+
   const buildChatAppConfig = (): ChatAppPublishConfig => ({
     displayName: chatAppDisplayName.trim() || undefined,
     welcomeMessage: chatAppWelcomeMessage.trim() || undefined,
@@ -1180,6 +1260,8 @@ export function PublishTab({
         return buildSlackConfig()
       case 'discord':
         return buildDiscordConfig()
+      case 'qq_official':
+        return buildQQOfficialConfig()
       case 'chat_app':
         return buildChatAppConfig()
       case 'glab':
@@ -1209,6 +1291,7 @@ export function PublishTab({
     feishu: feishuEnabled,
     slack: slackEnabled,
     discord: discordEnabled,
+    qq_official: qqOfficialEnabled,
     schedule: scheduleEnabled,
     chat_app: chatAppEnabled,
     glab: glabEnabled,
@@ -1224,6 +1307,8 @@ export function PublishTab({
     slackBotToken,
     discordApplicationId,
     discordBotToken,
+    qqOfficialAppId,
+    qqOfficialAppSecret,
     oauthAccessMode,
     oauthAllowedEmails,
     scheduleConfigs: buildScheduleConfigsForPublish(),
@@ -1249,6 +1334,8 @@ export function PublishTab({
         return setSlackEnabled(value)
       case 'discord':
         return setDiscordEnabled(value)
+      case 'qq_official':
+        return setQQOfficialEnabled(value)
       case 'schedule':
         return setScheduleEnabled(value)
       case 'chat_app':
@@ -1339,6 +1426,9 @@ export function PublishTab({
     const discordConfig: DiscordPublishConfig | undefined = discordEnabled
       ? buildDiscordConfig()
       : undefined
+    const qqOfficialConfig: QQOfficialPublishConfig | undefined = qqOfficialEnabled
+      ? buildQQOfficialConfig()
+      : undefined
 
     // Explicit null when disabled — not undefined. The publish route only writes
     // the column when the key is present, so omitting it would strand the previous
@@ -1373,6 +1463,7 @@ export function PublishTab({
       feishuConfig,
       slackConfig,
       discordConfig,
+      qqOfficialConfig,
       chatAppConfig,
       scheduleConfig,
       glabConfig,
@@ -1827,6 +1918,39 @@ export function PublishTab({
           onDmReplyModeChange={setDiscordDmReplyMode}
           sendArtifactsAsFile={discordSendArtifactsAsFile}
           onSendArtifactsAsFileChange={setDiscordSendArtifactsAsFile}
+        />
+      ),
+    },
+    {
+      key: 'qq_official',
+      label: t('agentPublish.channelQQOfficial'),
+      children: (
+        <QQOfficialChannelSection
+          agentId={agentId}
+          appId={qqOfficialAppId}
+          onAppIdChange={setQQOfficialAppId}
+          appSecret={qqOfficialAppSecret}
+          onAppSecretChange={setQQOfficialAppSecret}
+          enableGroupAndC2c={qqEnableGroupAndC2c}
+          onEnableGroupAndC2cChange={setQQEnableGroupAndC2c}
+          enableGuildMessages={qqEnableGuildMessages}
+          onEnableGuildMessagesChange={setQQEnableGuildMessages}
+          enableGuildDirectMessages={qqEnableGuildDirectMessages}
+          onEnableGuildDirectMessagesChange={setQQEnableGuildDirectMessages}
+          groupTriggerOnAt={qqGroupTriggerOnAt}
+          onGroupTriggerOnAtChange={setQQGroupTriggerOnAt}
+          groupTriggerOnNewMessage={qqGroupTriggerOnNewMessage}
+          onGroupTriggerOnNewMessageChange={setQQGroupTriggerOnNewMessage}
+          groupReplyMode={qqGroupReplyMode}
+          onGroupReplyModeChange={setQQGroupReplyMode}
+          c2cReplyMode={qqC2cReplyMode}
+          onC2cReplyModeChange={setQQC2cReplyMode}
+          guildReplyMode={qqGuildReplyMode}
+          onGuildReplyModeChange={setQQGuildReplyMode}
+          guildDmReplyMode={qqGuildDmReplyMode}
+          onGuildDmReplyModeChange={setQQGuildDmReplyMode}
+          sendArtifactsAsFile={qqSendArtifactsAsFile}
+          onSendArtifactsAsFileChange={setQQSendArtifactsAsFile}
         />
       ),
     },

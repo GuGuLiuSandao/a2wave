@@ -167,6 +167,7 @@ export function buildGatewayChannel(c: Context, opts: BuildGatewayChannelOpts): 
       upstream.channel_type === 'feishu' ||
       upstream.channel_type === 'slack' ||
       upstream.channel_type === 'discord' ||
+      upstream.channel_type === 'qq_official' ||
       upstream.channel_type === 'debug' ||
       upstream.channel_type === 'chat_app' ||
       upstream.channel_type === 'oauth' ||
@@ -501,6 +502,51 @@ export function buildDiscordChannel(opts: BuildDiscordChannelOpts): ChannelBuild
         ...(opts.threadId ? { thread_id: opts.threadId } : {}),
         sender_user_id: opts.senderUserId,
       },
+      user_info: null,
+      ...(displayName ? { display_name: displayName } : {}),
+    },
+    displayName,
+  }
+}
+
+// ── QQ Official ──────────────────────────────────────────────────────────────
+
+export type BuildQQOfficialChannelOpts = {
+  appId: string
+  messageId: string
+  senderOpenId: string
+  senderName?: string
+} & (
+  | { scene: 'group'; groupOpenId: string }
+  | { scene: 'c2c' }
+  | { scene: 'guild'; channelId: string; guildId?: string }
+  | { scene: 'guild_dm'; guildId: string }
+)
+
+export function buildQQOfficialChannel(opts: BuildQQOfficialChannelOpts): ChannelBuildResult {
+  const displayName = opts.senderName?.trim() || null
+  const common = {
+    app_id: opts.appId,
+    message_id: opts.messageId,
+    sender_open_id: opts.senderOpenId,
+  }
+  const channelInfo =
+    opts.scene === 'group'
+      ? { ...common, scene: opts.scene, group_open_id: opts.groupOpenId }
+      : opts.scene === 'guild'
+        ? {
+            ...common,
+            scene: opts.scene,
+            channel_id: opts.channelId,
+            ...(opts.guildId ? { guild_id: opts.guildId } : {}),
+          }
+        : opts.scene === 'guild_dm'
+          ? { ...common, scene: opts.scene, guild_id: opts.guildId }
+          : { ...common, scene: opts.scene }
+  return {
+    ctx: {
+      channel_type: 'qq_official',
+      channel_info: channelInfo,
       user_info: null,
       ...(displayName ? { display_name: displayName } : {}),
     },
