@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `qq_official_config` text;

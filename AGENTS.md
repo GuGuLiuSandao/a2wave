@@ -40,7 +40,7 @@ Stack: TypeScript, Biome (lint), TanStack Query, React Router v7
 
 ## Product Identity & Iron Rules
 
-a2wave is a general-purpose Agent building and orchestration platform for enterprises. It builds on mature agent CLIs such as Cursor Agent / Claude Code / OpenAI Codex, extends capabilities via Skills and MCP Servers, and publishes Agents over API / Feishu / Slack / Discord / A2A / scheduled / chat page / GitLab repository trigger / GitHub repository trigger.
+a2wave is a general-purpose Agent building and orchestration platform for enterprises. It builds on mature agent CLIs such as Cursor Agent / Claude Code / OpenAI Codex, extends capabilities via Skills and MCP Servers, and publishes Agents over API / Feishu / Slack / Discord / QQ Official WebSocket / A2A / scheduled / chat page / GitLab repository trigger / GitHub repository trigger.
 
 **The goal: a business team can build a general-purpose business Agent** — not a pipeline hardcoded for one scenario, but a reusable, composable digital worker callable from the channels the team already uses. Generality comes from *combining information sources* — a code checkout, Skills and Memory, live systems over MCP — never from a single one of them. The platform makes each source reliable to attach and dependable to run against; what to do with them is the Agent's decision. See [docs/PRODUCT.md](./docs/PRODUCT.md).
 

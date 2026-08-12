@@ -10,6 +10,7 @@ export interface GracefulShutdownDeps {
   stopFeishu: () => void
   stopSlack: () => void
   stopDiscord: () => void
+  stopQQOfficial: () => void
   stopSchedules: () => void
   /**
    * Wait for fire-and-forget audit inserts to settle. `logAudit` returns void and
@@ -46,6 +47,7 @@ export async function runGracefulShutdownSequence(deps: GracefulShutdownDeps): P
   safely(deps.stopFeishu, 'stopFeishu')
   safely(deps.stopSlack, 'stopSlack')
   safely(deps.stopDiscord, 'stopDiscord')
+  safely(deps.stopQQOfficial, 'stopQQOfficial')
   safely(deps.stopSchedules, 'stopSchedules')
   // After the engines (their terminal-state writes may themselves audit) and
   // strictly before the database closes.
