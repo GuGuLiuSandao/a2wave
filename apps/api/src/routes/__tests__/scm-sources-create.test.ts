@@ -69,7 +69,7 @@ vi.mock('../../lib/p4-sync.js', () => ({
   releaseCheckout: vi.fn(),
   startAutoSync: vi.fn(),
   stopAutoSync: vi.fn(),
-  syncScmSource: vi.fn(),
+  syncScmSource: vi.fn(() => Promise.resolve()),
   tryAcquireCheckout: vi.fn(() => true),
 }))
 vi.mock('../../lib/codegraph-index.js', () => ({
@@ -83,7 +83,7 @@ vi.mock('../../lib/logger.js', () => ({
 }))
 
 import { logAudit } from '../../lib/audit.js'
-import { startAutoSync, stopAutoSync } from '../../lib/p4-sync.js'
+import { startAutoSync, stopAutoSync, syncScmSource } from '../../lib/p4-sync.js'
 
 import { asyncQuery } from '../../test/async-query.js'
 
@@ -131,6 +131,43 @@ describe('POST /scm-sources — credential normalization', () => {
     expect(insertedValues.current?.localPath).toMatch(/sources\//)
     expect(insertedValues.current?.workspacesPath).toMatch(/workspaces\//)
     expect(insertedValues.current?.localPath).not.toBe(insertedValues.current?.workspacesPath)
+  })
+
+  it('starts the initial sync immediately when auto-sync is enabled', async () => {
+    const app = await buildApp()
+    const res = await create(app, {
+      name: 'auto-sync repo',
+      type: 'git',
+      config: {
+        type: 'git',
+        repoUrl: 'https://github.com/org/repo.git',
+        autoSync: true,
+        syncIntervalMin: 30,
+      },
+    })
+
+    expect(res.status).toBe(201)
+    expect(startAutoSync).toHaveBeenCalledOnce()
+    expect(syncScmSource).toHaveBeenCalledOnce()
+    expect(syncScmSource).toHaveBeenCalledWith(insertedValues.current?.id)
+  })
+
+  it('leaves the initial sync manual when auto-sync is disabled', async () => {
+    const app = await buildApp()
+    const res = await create(app, {
+      name: 'manual-sync repo',
+      type: 'git',
+      config: {
+        type: 'git',
+        repoUrl: 'https://github.com/org/repo.git',
+        autoSync: false,
+        syncIntervalMin: 30,
+      },
+    })
+
+    expect(res.status).toBe(201)
+    expect(startAutoSync).not.toHaveBeenCalled()
+    expect(syncScmSource).not.toHaveBeenCalled()
   })
 
   it('rejects the retired setupScript field instead of silently discarding it', async () => {

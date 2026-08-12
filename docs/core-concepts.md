@@ -63,7 +63,7 @@ Represents a version control repository that provides a managed working director
 ### Initial Sync and Agent Selectability
 
 - **Initial sync timeout** — the config option `initialSyncTimeoutMin` (minutes, default 30) represents the timeout for the initial sync; currently used only as configuration and for future extension.
-- **Initial sync completed** — once an SCM Source has completed at least one **successful** sync, the system writes `initialSyncCompletedAt`. Only when this field has a value can the SCM Source be selected by an Agent.
+- **Initial sync completed** — creating a source with auto-sync enabled starts its first sync immediately in the background; disabling auto-sync leaves it manual. Once an SCM Source has completed at least one **successful** sync, the system writes `initialSyncCompletedAt`. Only when this field has a value can the SCM Source be selected by an Agent.
 - **Constraint** — an SCM that has not completed its initial sync cannot be selected when creating/editing an Agent; if an Agent is bound to such an SCM when executing a Run or Chat, the API returns 400. Subsequent scheduled sync (`syncIntervalMin`) logic is unaffected.
 
 ### P4 Source

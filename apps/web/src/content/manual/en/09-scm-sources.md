@@ -31,7 +31,7 @@ Key fields: `p4port`, `p4user`, `p4passwd`, `p4client`, optional `depotPath`, pl
 1. Go to the "SCM Sources" page, click "Create source", and choose Git or P4 in the dialog.
 2. Keep **Managed storage (recommended)** to let a2wave allocate the checkout on its persistent SCM volume, then enter the repository address and authentication information. Choose **Custom path** only when the deployment operator has mounted that absolute container path.
 3. Once the connection fields are filled in, click **Test Connection** below that section (**Test All Repos** in multi-repo mode) to verify connectivity. It probes using the values **currently in the form** and saves nothing, so you can test before creating the source; multi-repo results list each repository's pass/fail with its own reason.
-4. After saving, reopen the source: the dialog gains a "Sync & Workspaces" tab where you use **Check connection** to re-verify the **saved** configuration and trigger a **sync** (the workspaces/worktree list is managed on that tab too).
+4. After saving, a2wave starts the initial sync in the background immediately when **Auto Sync** is enabled (the default), then continues at the configured interval. With Auto Sync disabled, the initial sync remains manual. Reopen the source to view its status in "Sync & Workspaces", re-verify the **saved** configuration with **Check connection**, or click **Sync now** (the workspaces/worktree list is managed there too).
 
 > When editing an existing source, the PAT / P4 password are shown masked. As long as you leave them untouched, Test Connection probes with the real stored credential.
 
@@ -59,6 +59,7 @@ Once CodeGraph is enabled, a2wave maintains the index automatically after the SC
 ## Sync and Initial-Sync Constraints
 
 - **Manual sync / sync status**: `idle` / `syncing` / `error`.
+- **Automatic initial sync**: creating a source with Auto Sync enabled starts its first sync immediately in the background instead of waiting for the first interval. With Auto Sync disabled, click **Sync now** manually.
 - ⚠️ **Important constraint**: an SCM Source can only be selected by an Agent **after its initial sync succeeds** (writing `initialSyncCompletedAt`). Before that, creating/updating an Agent bound to the source is rejected.
 - **Cannot change the repo path/config mid-sync**: changing `localPath` or `config` while a sync is in progress returns **409**. Those fields reset the sync bookkeeping, and resetting during a running sync would corrupt it. Wait for the sync to finish first.
 
@@ -74,7 +75,7 @@ Once CodeGraph is enabled, a2wave maintains the index automatically after the SC
 
 | Symptom | Possible Cause | Fix |
 |------|---------|------|
-| Agent can't select the SCM Source | Initial sync not completed | Sync successfully once first |
+| Agent can't select the SCM Source | Initial sync is still running or failed | Check its sync status; if Auto Sync is disabled, click **Sync now** |
 | Sync error | Credentials/network/branch doesn't exist | Investigate with "Check connection", confirm the PAT and branch |
 | P4 Client Root does not cover local path | The server-side P4 Client Spec points at a host path or another container path | Set `Root`/`AltRoots` to the resolved `/data/workspace/sources/...` path, or recreate the source with a mounted custom path |
 | Deleting a worktree returns 409 | It is in use | Wait for the corresponding Run to finish or release it, then delete |

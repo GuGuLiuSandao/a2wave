@@ -251,10 +251,16 @@ app.post('/', async (c) => {
       .returning()
   )[0]
 
-  // 如果启用了自动同步，启动调度器（P4 和 Git 通用）
+  // Auto-sync means the source should become usable without waiting for the
+  // first interval tick. Start the initial sync in the background, then keep
+  // the regular scheduler for subsequent refreshes. A source with auto-sync
+  // disabled remains explicitly manual.
   const syncConfig = parsed.data.config as { autoSync?: boolean; syncIntervalMin?: number }
   if (syncConfig.autoSync && syncConfig.syncIntervalMin) {
     startAutoSync(id, syncConfig.syncIntervalMin)
+    void syncScmSource(id).catch((error) => {
+      logger.error({ sourceId: id, error }, 'Initial SCM sync failed')
+    })
   }
 
   logAudit(c, {
