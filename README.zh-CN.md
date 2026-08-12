@@ -128,10 +128,12 @@ docker pull ghcr.io/lilithgames/a2wave:latest
 > 它可以关闭这个窗口。
 
 > [!IMPORTANT]
-> **macOS 用户**请先把以下配置加入 `.env`。Docker Desktop 会把 bind mount 报告为 root
-> 所有，entrypoint 拒绝接管，不加这些配置容器会反复重启。
+> **macOS 用户**请先把以下配置加入 `.env`。`/data/workspace` 不在 Docker Desktop 默认
+> 共享的宿主机路径中，因此需要改为用户目录下的路径；同时固定容器 UID/GID，避免 VirtioFS
+> 将宿主机 bind mount 报告为 root 所有。
 >
 > ```bash
+> A2WAVE_WORKSPACE_DIR=$HOME/a2wave-workspace
 > A2WAVE_RUN_AS_UID=10001
 > A2WAVE_RUN_AS_GID=10001
 > ```

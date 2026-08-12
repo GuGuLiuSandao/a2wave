@@ -89,7 +89,12 @@ export function pathsOverlap(a: string, b: string): boolean {
  * 现在拉全表在内存里过一遍——scm sources 数量小（通常几十条）。
  */
 export function findWorkspacesPathConflict(
-  sources: ReadonlyArray<{ id: string; name: string; workspacesPath: string | null }>,
+  sources: ReadonlyArray<{
+    id: string
+    name: string
+    localPath?: string
+    workspacesPath: string | null
+  }>,
   candidate: string,
   excludeId?: string,
 ): { id: string; name: string; workspacesPath: string | null } | null {
@@ -99,7 +104,12 @@ export function findWorkspacesPathConflict(
     // 迁移后旧数据都是 NULL，如果这里跳过，新 source 就能显式填到旧 source 的默认
     // 目录下绕过 overlap 检查。统一按 runtime 的有效值比对。
     const effective = s.workspacesPath ?? defaultWorkspacesPath(s.id)
-    if (pathsOverlap(effective, candidate)) return s
+    if (
+      pathsOverlap(effective, candidate) ||
+      (s.localPath && pathsOverlap(s.localPath, candidate))
+    ) {
+      return s
+    }
   }
   return null
 }
@@ -217,7 +227,12 @@ app.post('/', async (c) => {
 
   // 检查 workspacesPath 唯一性（含 overlap：祖先/后代目录也算冲突）
   const allSources = await db
-    .select({ id: scmSources.id, name: scmSources.name, workspacesPath: scmSources.workspacesPath })
+    .select({
+      id: scmSources.id,
+      name: scmSources.name,
+      localPath: scmSources.localPath,
+      workspacesPath: scmSources.workspacesPath,
+    })
     .from(scmSources)
   const wsConflict = findWorkspacesPathConflict(allSources, finalWorkspacesPath)
   if (wsConflict) {
@@ -349,7 +364,12 @@ app.patch('/:id', async (c) => {
     return c.json({ error: 'workspacesPath must not overlap with localPath' }, 400)
   }
   const allSources = await db
-    .select({ id: scmSources.id, name: scmSources.name, workspacesPath: scmSources.workspacesPath })
+    .select({
+      id: scmSources.id,
+      name: scmSources.name,
+      localPath: scmSources.localPath,
+      workspacesPath: scmSources.workspacesPath,
+    })
     .from(scmSources)
   const wsConflict = findWorkspacesPathConflict(allSources, effectiveWsPath, id)
   if (wsConflict) {
@@ -495,6 +515,11 @@ app.delete('/:id', async (c) => {
     const names = referencingAgents.map((a) => a.name).join(', ')
     return c.json({ error: `Cannot delete: referenced by agents: ${names}` }, 409)
   }
+
+  // Automatic initial checkouts are owned by this process and are safe to
+  // cancel before deletion. Manual/recurring syncs and indexing jobs remain
+  // protected by the busy and atomic DB guards below.
+  await cancelInitialScmSync(id)
 
   if (isCheckoutBusy(id)) {
     return c.json({ error: 'Cannot delete an SCM source while its checkout is in use' }, 409)

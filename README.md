@@ -142,11 +142,12 @@ publish it — the in-app manual at `/wiki` walks through the first one end to e
 > the admin account. Set it in `.env` to close that window.
 
 > [!IMPORTANT]
-> **On macOS**, add this to `.env` first — Docker Desktop reports bind mounts as
-> root-owned, which the entrypoint refuses to adopt, so the container crash-loops
-> without it.
+> **On macOS**, add this to `.env` first. `/data/workspace` is outside Docker
+> Desktop's shared host paths, so use a directory under your home folder. Pinning
+> the container UID/GID also avoids VirtioFS reporting host binds as root-owned.
 >
 > ```bash
+> A2WAVE_WORKSPACE_DIR=$HOME/a2wave-workspace
 > A2WAVE_RUN_AS_UID=10001
 > A2WAVE_RUN_AS_GID=10001
 > ```

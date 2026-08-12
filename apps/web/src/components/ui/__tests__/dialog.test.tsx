@@ -12,6 +12,6 @@ describe('DialogTitle', () => {
       </Dialog>,
     )
 
-    expect(screen.getByRole('heading', { name: 'Create source' })).toHaveClass('text-2xl')
+    expect(screen.getByRole('heading', { name: 'Create source' })).toHaveClass('text-[1.4rem]')
   })
 })

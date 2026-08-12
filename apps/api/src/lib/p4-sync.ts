@@ -228,6 +228,17 @@ export async function executeP4Sync(
   if (isManagedLocalPath(localPath)) {
     try {
       await p4Login(config, signal)
+      const { stdout: infoOutput } = await execFileAsync('p4', ['info'], {
+        env: { ...process.env, ...buildP4Env(config) },
+        timeout: 15_000,
+        signal,
+      })
+      if (/^Client unknown\.\s*$/im.test(infoOutput)) {
+        return {
+          ok: false,
+          message: `P4 sync failed: client "${config.p4client}" does not exist yet. Create it with a Root or AltRoots that covers the local path.`,
+        }
+      }
       const roots = await getP4ClientRoots(config, signal)
       if (roots.length > 0 && !p4ClientRootCoversPath(localPath, roots)) {
         return {
@@ -336,6 +347,8 @@ const activeInitialSyncs = new Map<
   string,
   { controller: AbortController; promise: Promise<ScmSyncResult> }
 >()
+const INITIAL_SYNC_RECOVERY_CONCURRENCY = 2
+let initialSyncRecoveryGeneration = 0
 
 /** Start one cancellable background initial checkout for create/update/recovery. */
 export function startInitialScmSync(sourceId: string): Promise<ScmSyncResult> {
@@ -357,6 +370,34 @@ export async function cancelInitialScmSync(sourceId: string): Promise<boolean> {
   active.controller.abort()
   await active.promise
   return true
+}
+
+/** Queue restart recovery without launching every incomplete clone at once. */
+export function startInitialSyncRecovery(
+  sourceIds: readonly string[],
+  startSync: (sourceId: string) => Promise<ScmSyncResult> = startInitialScmSync,
+): void {
+  const generation = initialSyncRecoveryGeneration
+  let nextIndex = 0
+  let activeCount = 0
+
+  const startNext = (): void => {
+    if (generation !== initialSyncRecoveryGeneration) return
+    while (activeCount < INITIAL_SYNC_RECOVERY_CONCURRENCY && nextIndex < sourceIds.length) {
+      const sourceId = sourceIds[nextIndex++]
+      activeCount++
+      void startSync(sourceId)
+        .catch((error) => {
+          logger.error({ sourceId, error }, 'Recovered initial SCM sync failed')
+        })
+        .finally(() => {
+          activeCount--
+          startNext()
+        })
+    }
+  }
+
+  startNext()
 }
 
 /** Whether a sync or its post-sync work is currently writing this checkout. */
@@ -535,15 +576,16 @@ async function runSyncUnderCheckoutLock(
     const message = error instanceof Error ? error.message : String(error)
     result = { ok: false, message: `SCM sync failed: ${message}` }
   }
+  const cancelled = options.signal?.aborted === true
 
   // 更新最终状态；首次成功同步时写入 initialSyncCompletedAt。
   try {
     await db
       .update(scmSources)
       .set({
-        syncStatus: result.ok ? 'idle' : 'error',
+        syncStatus: result.ok || cancelled ? 'idle' : 'error',
         lastSyncAt: new Date(),
-        lastSyncError: result.ok ? null : result.message,
+        lastSyncError: result.ok || cancelled ? null : result.message,
         updatedAt: new Date(),
         ...(result.ok && source.initialSyncCompletedAt == null
           ? { initialSyncCompletedAt: new Date() }
@@ -590,6 +632,8 @@ async function runSyncUnderCheckoutLock(
       { sourceId, name: source.name, type: source.type, filesUpdated: result.filesUpdated },
       'SCM sync completed',
     )
+  } else if (cancelled) {
+    logger.info({ sourceId, name: source.name, type: source.type }, 'SCM sync cancelled')
   } else {
     logger.error(
       { sourceId, name: source.name, type: source.type, error: result.message },
@@ -675,6 +719,7 @@ export function stopAllAutoSync(): void {
   }
   syncTimers.clear()
   inFlightAutoSyncs.clear()
+  initialSyncRecoveryGeneration++
   for (const sync of activeInitialSyncs.values()) sync.controller.abort()
   activeInitialSyncs.clear()
   busyCheckouts.clear()
@@ -739,6 +784,7 @@ export async function initAutoSyncSchedulers(): Promise<void> {
   }
 
   const sources = await db.select().from(scmSources).where(eq(scmSources.isEnabled, true))
+  const incompleteSourceIds: string[] = []
 
   for (const source of sources) {
     const config = source.config as unknown as { autoSync?: boolean; syncIntervalMin?: number }
@@ -746,11 +792,10 @@ export async function initAutoSyncSchedulers(): Promise<void> {
       startAutoSync(source.id, config.syncIntervalMin)
     }
     if (source.initialSyncCompletedAt == null) {
-      void startInitialScmSync(source.id).catch((error) => {
-        logger.error({ sourceId: source.id, error }, 'Recovered initial SCM sync failed')
-      })
+      incompleteSourceIds.push(source.id)
     }
   }
+  startInitialSyncRecovery(incompleteSourceIds)
 
   logger.info({ count: syncTimers.size }, 'Auto-sync schedulers initialized')
 }

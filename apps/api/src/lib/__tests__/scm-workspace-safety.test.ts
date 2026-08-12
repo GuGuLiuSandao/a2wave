@@ -82,6 +82,20 @@ describe('validateScmWorkspacesRoot', () => {
     ).toMatch(/protected platform storage/)
   })
 
+  it('rejects workspaces beneath the managed checkout tree', () => {
+    const originalStorageRoot = env.SCM_STORAGE_ROOT
+    env.SCM_STORAGE_ROOT = '/data/workspace'
+    try {
+      expect(
+        validateScmWorkspacesRoot('/data/workspace/sources/source-a', '/data/workspace', {
+          protectedPaths: [],
+        }),
+      ).toMatch(/managed SCM checkout storage/)
+    } finally {
+      env.SCM_STORAGE_ROOT = originalStorageRoot
+    }
+  })
+
   it('rejects a filesystem root that would contain protected platform storage', async () => {
     expect(
       validateScmWorkspacesRoot('/', '', {

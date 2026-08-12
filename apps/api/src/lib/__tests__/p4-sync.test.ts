@@ -83,11 +83,13 @@ import {
   releaseCheckout,
   startAutoSync,
   startInitialScmSync,
+  startInitialSyncRecovery,
   stopAllAutoSync,
   stopAutoSync,
   syncScmSource,
   tryAcquireCheckout,
 } from '../p4-sync.js'
+import type { ScmSyncResult } from '../p4-sync.js'
 
 describe('P4 client roots', () => {
   it('parses Root and AltRoots from a client spec', () => {
@@ -298,6 +300,38 @@ describe('executeP4Sync', () => {
     env.SCM_STORAGE_ROOT = originalRoot
     expect(result.ok).toBe(true)
     expect(mockExecFile.mock.calls.some((call) => (call[1] as string[])[0] === 'sync')).toBe(true)
+  })
+
+  it('reports an unknown managed P4 client instead of inspecting its template Root', async () => {
+    const originalRoot = env.SCM_STORAGE_ROOT
+    env.SCM_STORAGE_ROOT = '/managed'
+    mockExecFile.mockImplementation((...args: unknown[]) => {
+      const commandArgs = args[1] as string[]
+      const cb = args[args.length - 1] as (
+        err: Error | null,
+        result?: { stdout: string; stderr: string },
+      ) => void
+      if (commandArgs[0] === 'info') {
+        cb(null, { stdout: 'Server address: p4:1666\nClient unknown.\n', stderr: '' })
+      } else if (commandArgs[0] === 'client') {
+        cb(null, { stdout: 'Root:\t/app\n', stderr: '' })
+      } else {
+        cb(null, { stdout: '', stderr: '' })
+      }
+    })
+
+    const result = await executeP4Sync(
+      { ...p4ConfigDefaults, p4port: 'p4:1666', p4user: 'u', p4client: 'missing-client' },
+      '/managed/sources/source-a',
+    )
+
+    env.SCM_STORAGE_ROOT = originalRoot
+    expect(result).toMatchObject({ ok: false })
+    expect(result.message).toContain('does not exist yet')
+    expect(mockExecFile.mock.calls.some((call) => (call[1] as string[])[0] === 'client')).toBe(
+      false,
+    )
+    expect(mockExecFile.mock.calls.some((call) => (call[1] as string[])[0] === 'sync')).toBe(false)
   })
 
   it('creates localPath directory if it does not exist', async () => {
@@ -570,6 +604,7 @@ describe('syncScmSource', () => {
     await expect(running).resolves.toMatchObject({ ok: false })
     expect(receivedSignal?.aborted).toBe(true)
     expect(isCheckoutBusy('s1')).toBe(false)
+    expect(mockNotifyScmSyncError).not.toHaveBeenCalled()
   })
 
   it('starts CodeGraph indexing after successful sync when enabled', async () => {
@@ -1246,6 +1281,28 @@ describe('initAutoSyncSchedulers', () => {
     await expect(initAutoSyncSchedulers()).resolves.toBeUndefined()
 
     stopAutoSync('s1')
+  })
+})
+
+describe('startInitialSyncRecovery', () => {
+  beforeEach(() => stopAllAutoSync())
+  afterEach(() => stopAllAutoSync())
+
+  it('limits restart recovery to two concurrent initial checkouts', async () => {
+    const releases: Array<() => void> = []
+    const startSync = vi.fn(
+      (_sourceId: string) =>
+        new Promise<ScmSyncResult>((resolve) => {
+          releases.push(() => resolve({ ok: true, message: 'done' }))
+        }),
+    )
+
+    startInitialSyncRecovery(['s1', 's2', 's3', 's4'], startSync)
+    await vi.waitFor(() => expect(startSync).toHaveBeenCalledTimes(2))
+
+    releases.shift()?.()
+    await vi.waitFor(() => expect(startSync).toHaveBeenCalledTimes(3))
+    expect(startSync.mock.calls[2]?.[0]).toBe('s3')
   })
 })
 

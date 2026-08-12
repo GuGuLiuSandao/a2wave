@@ -437,6 +437,26 @@ describe('SCM Sources routes', () => {
       expect(res.status).toBe(200)
     })
 
+    it('cancels an automatic initial checkout before deleting the source', async () => {
+      ;(cancelInitialScmSync as Mock).mockResolvedValueOnce(true)
+      ;(db.select as Mock)
+        .mockReturnValueOnce(
+          makeDbChain({
+            id: 'scm_1',
+            name: 'Source',
+            initialSyncCompletedAt: null,
+            syncStatus: 'syncing',
+          }),
+        )
+        .mockReturnValueOnce(makeDbChain([]))
+      ;(db.delete as Mock).mockReturnValue(makeDeleteChain())
+
+      const res = await app.request('/api/scm-sources/scm_1', { method: 'DELETE' })
+
+      expect(res.status).toBe(200)
+      expect(cancelInitialScmSync).toHaveBeenCalledWith('scm_1')
+    })
+
     it('returns 404 for non-existent source', async () => {
       ;(db.select as Mock).mockReturnValue(makeDbChain(undefined))
 

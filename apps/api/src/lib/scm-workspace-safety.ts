@@ -116,6 +116,13 @@ export function validateScmWorkspacesRoot(
     return 'workspacesPath must not overlap protected platform storage'
   }
 
+  const managedCheckoutRoot = canonicalizeThroughExistingAncestor(
+    join(env.SCM_STORAGE_ROOT, 'sources'),
+  )
+  if (pathsOverlap(managedCheckoutRoot, candidatePath, platform)) {
+    return 'workspacesPath must not overlap managed SCM checkout storage'
+  }
+
   return null
 }
 

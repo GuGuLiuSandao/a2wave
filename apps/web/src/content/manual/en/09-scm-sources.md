@@ -61,9 +61,9 @@ Once CodeGraph is enabled, a2wave maintains the index automatically after the SC
 ## Sync and Initial-Sync Constraints
 
 - **Manual sync / sync status**: `idle` / `syncing` / `error`.
-- **Automatic initial sync**: every enabled source starts or resumes its first sync immediately after create, repair, enable, or service restart. `autoSync` controls only recurring refreshes.
+- **Automatic initial sync**: every enabled source starts or resumes its first sync immediately after create, repair, enable, or service restart. Restart recovery runs at most two initial checkouts concurrently. `autoSync` controls only recurring refreshes.
 - ⚠️ **Important constraint**: an SCM Source can only be selected by an Agent **after its initial sync succeeds** (writing `initialSyncCompletedAt`). Before that, creating/updating an Agent bound to the source is rejected.
-- **Editing during sync**: a2wave cancels and waits for its own background initial checkout before applying a repair. Manual syncs, recurring syncs, and indexing still return **409** while they hold the checkout.
+- **Editing or deleting during sync**: a2wave cancels and waits for its own background initial checkout before applying a repair or deletion. Manual syncs, recurring syncs, and indexing still return **409** while they hold the checkout.
 
 ## Workspace (worktree) Management
 

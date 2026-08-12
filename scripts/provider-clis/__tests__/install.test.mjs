@@ -354,26 +354,27 @@ test('entrypoint creates the install root without relying on the cached ownershi
   assert.match(entrypoint, /refusing to start: \$cli_path is a symlink/)
 })
 
-test('entrypoint makes fresh root-owned SCM storage writable without changing user-owned binds', () => {
+test('entrypoint owns only managed SCM subdirectories, never a host mount root', () => {
   const entrypoint = readFileSync(resolve(root, 'docker-entrypoint.sh'), 'utf8')
   const noRemap = entrypoint.indexOf('no remap needed')
   const storageRoot = entrypoint.indexOf('SCM_STORAGE_ROOT="${SCM_STORAGE_ROOT:-')
   assert.ok(storageRoot > noRemap, 'SCM ownership repair must run after both UID branches')
   assert.match(entrypoint, /mkdir -p "\$SCM_STORAGE_ROOT"/)
-  assert.match(entrypoint, /SCM_STORAGE_OWNER="\$\(stat -c '%u' "\$SCM_STORAGE_ROOT"\)"/)
-  assert.match(
+  assert.match(entrypoint, /for scm_subdir in sources workspaces; do/)
+  assert.match(entrypoint, /scm_dir="\$SCM_STORAGE_ROOT\/\$scm_subdir"/)
+  assert.match(entrypoint, /chown -h "\$TARGET_UID:\$TARGET_GID" "\$scm_dir"/)
+  assert.doesNotMatch(
     entrypoint,
-    /"\$\{A2WAVE_MANAGED_SCM_VOLUME:-false\}" = "true".*-z "\$\{A2WAVE_SCM_BIND_SOURCE:-\}".*"\$SCM_STORAGE_OWNER" = "0"/s,
+    /chown -h "\$TARGET_UID:\$TARGET_GID" "\$SCM_STORAGE_ROOT"(?:\s|$)/,
   )
-  assert.match(entrypoint, /chown -h "\$TARGET_UID:\$TARGET_GID" "\$SCM_STORAGE_ROOT"/)
   assert.match(entrypoint, /refusing to start: \$SCM_STORAGE_ROOT is a symlink/)
 })
 
-test('root Compose does not opt a host bind mount into SCM root ownership changes', () => {
+test('root Compose does not pass host ownership policy into the container', () => {
   const compose = readFileSync(resolve(root, 'docker-compose.yml'), 'utf8')
 
   assert.doesNotMatch(compose, /A2WAVE_MANAGED_SCM_VOLUME/)
-  assert.match(compose, /A2WAVE_SCM_BIND_SOURCE=\$\{A2WAVE_WORKSPACE_DIR:-\}/)
+  assert.doesNotMatch(compose, /A2WAVE_SCM_BIND_SOURCE/)
 })
 
 // ---------------------------------------------------------------------------

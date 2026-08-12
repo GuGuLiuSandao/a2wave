@@ -38,7 +38,7 @@ exception; see `AUTH_SECRET`.
 | `TRUSTED_IMPORT_HOSTS` | empty | Exact Agent-export DNS hostnames allowed to resolve to controlled enterprise-private addresses during URL import |
 | `TRUSTED_MCP_HOSTS` | empty | Exact remote MCP DNS hostnames allowed to resolve to controlled enterprise-private addresses |
 | `TRUSTED_A2A_ROUTE_HOSTS` | empty | Exact remote A2A DNS hostnames allowed as private-address exceptions when public-only mode is enabled |
-| `SCM_WORKSPACES_ALLOWED_ROOTS` | empty | Comma-separated absolute roots approved for non-admin custom Git workspaces; `SCM_STORAGE_ROOT/workspaces` is always allowed |
+| `SCM_WORKSPACES_ALLOWED_ROOTS` | empty | Comma-separated absolute roots approved for non-admin custom Git workspaces; `SCM_STORAGE_ROOT/workspaces` is always allowed, while `SCM_STORAGE_ROOT/sources` is always rejected to protect managed checkouts |
 | `ALLOW_PRIVATE_ROUTE_TARGETS` | `true` | Allow ordinary private/CGNAT/ULA remote A2A targets with per-hop validation and DNS pinning; set `false` for public-only mode (exact hostname exceptions remain available) |
 
 > Adjusting `AUTH_SESSION_TTL_DAYS` only affects new logins / newly issued tokens; to
