@@ -12,6 +12,7 @@ exception; see `AUTH_SECRET`.
 |------|------|------|
 | `AUTH_SECRET` | auto-generated | Signing secret for sessions and tokens. Left empty, `pnpm dev` writes one into `.env` and the container persists one in its data volume, so restarts keep you logged in. Set it explicitly (`openssl rand -hex 32`) to control the value — an explicit secret is never overwritten. **Required when running more than one replica** (see below) |
 | `DATABASE_URL` | `./data/a2wave.db` | A `postgres://` scheme selects PostgreSQL; anything else is a SQLite file path. See [PostgreSQL](./postgresql.md) |
+| `SCM_STORAGE_ROOT` | `~/.a2wave` (`/data/workspace` in Docker) | Root for managed SCM checkouts under `sources/` and Git worktrees under `workspaces/` |
 
 > [!IMPORTANT]
 > **Multi-replica deployments must set `AUTH_SECRET` explicitly, to the same value on
@@ -37,7 +38,7 @@ exception; see `AUTH_SECRET`.
 | `TRUSTED_IMPORT_HOSTS` | empty | Exact Agent-export DNS hostnames allowed to resolve to controlled enterprise-private addresses during URL import |
 | `TRUSTED_MCP_HOSTS` | empty | Exact remote MCP DNS hostnames allowed to resolve to controlled enterprise-private addresses |
 | `TRUSTED_A2A_ROUTE_HOSTS` | empty | Exact remote A2A DNS hostnames allowed as private-address exceptions when public-only mode is enabled |
-| `SCM_WORKSPACES_ALLOWED_ROOTS` | empty | Comma-separated absolute roots approved for non-admin custom Git workspaces; the built-in `~/.a2wave/workspaces` root is always allowed |
+| `SCM_WORKSPACES_ALLOWED_ROOTS` | empty | Comma-separated absolute roots approved for non-admin custom Git workspaces; `SCM_STORAGE_ROOT/workspaces` is always allowed |
 | `ALLOW_PRIVATE_ROUTE_TARGETS` | `true` | Allow ordinary private/CGNAT/ULA remote A2A targets with per-hop validation and DNS pinning; set `false` for public-only mode (exact hostname exceptions remain available) |
 
 > Adjusting `AUTH_SESSION_TTL_DAYS` only affects new logins / newly issued tokens; to
@@ -46,12 +47,12 @@ exception; see `AUTH_SECRET`.
 
 ## macOS Docker Desktop
 
-Docker Desktop does not share `/data`, and it reports bind mounts as root-owned —
-which the entrypoint refuses to adopt, so the container crash-loops without these.
+The default SCM storage is a Docker named volume and needs no macOS file-sharing
+setup. These overrides apply only when an operator deliberately uses host bind mounts.
 
 | Variable | Description |
 |------|------|
-| `A2WAVE_WORKSPACE_DIR` | Host directory for the workspace, e.g. `$HOME/a2wave-workspace` |
+| `A2WAVE_WORKSPACE_DIR` | Optional host directory replacing the named volume, e.g. `$HOME/a2wave-workspace` |
 | `A2WAVE_RUN_AS_UID` | UID the container process runs as, e.g. `10001` |
 | `A2WAVE_RUN_AS_GID` | GID the container process runs as, e.g. `10001` |
 
@@ -68,7 +69,7 @@ Bootstrap a Git or Perforce checkout from the environment on first boot.
 | `SCM_P4_PASSWD` | P4 password |
 | `SCM_P4_CLIENT` | P4 Workspace name |
 | `SCM_P4_DEPOT_PATH` | Depot path, e.g. `//depot/main/...` |
-| `SCM_P4_LOCAL_PATH` | Local sync directory, defaults to `/app/data/p4-workspace` |
+| `SCM_P4_LOCAL_PATH` | Optional sync directory; empty allocates a managed path under `SCM_STORAGE_ROOT/sources` |
 | `SCM_P4_AUTO_SYNC` | Whether to auto-sync, defaults to `true` |
 
 ### Git SCM source (created automatically once the URL is set)
@@ -79,7 +80,7 @@ Bootstrap a Git or Perforce checkout from the environment on first boot.
 | `SCM_GIT_BRANCH` | Branch, defaults to `main` |
 | `SCM_GIT_USERNAME` | Username (HTTPS authentication) |
 | `SCM_GIT_PAT` | Personal Access Token |
-| `SCM_GIT_LOCAL_PATH` | Local clone directory, defaults to `/app/data/git-workspace` |
+| `SCM_GIT_LOCAL_PATH` | Optional clone directory; empty allocates a managed path under `SCM_STORAGE_ROOT/sources` |
 | `SCM_GIT_AUTO_SYNC` | Whether to auto-sync, defaults to `true` |
 
 ## Settings overrides (optional)

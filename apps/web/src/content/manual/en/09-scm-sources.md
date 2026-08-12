@@ -29,11 +29,21 @@ Key fields: `p4port`, `p4user`, `p4passwd`, `p4client`, optional `depotPath`, pl
 ## Creating and Connecting
 
 1. Go to the "SCM Sources" page, click "Create source", and choose Git or P4 in the dialog.
-2. Enter the repository address and authentication information on the "Config" tab.
+2. Keep **Managed storage (recommended)** to let a2wave allocate the checkout on its persistent SCM volume, then enter the repository address and authentication information. Choose **Custom path** only when the deployment operator has mounted that absolute container path.
 3. Once the connection fields are filled in, click **Test Connection** below that section (**Test All Repos** in multi-repo mode) to verify connectivity. It probes using the values **currently in the form** and saves nothing, so you can test before creating the source; multi-repo results list each repository's pass/fail with its own reason.
 4. After saving, reopen the source: the dialog gains a "Sync & Workspaces" tab where you use **Check connection** to re-verify the **saved** configuration and trigger a **sync** (the workspaces/worktree list is managed on that tab too).
 
 > When editing an existing source, the PAT / P4 password are shown masked. As long as you leave them untouched, Test Connection probes with the real stored credential.
+
+The managed checkout is stored under `SCM_STORAGE_ROOT/sources/<sourceId>`. In the
+Docker deployment this is `/data/workspace/sources/<sourceId>` on the dedicated
+`a2wave-workspace` volume, so an image upgrade or container recreation does not remove it.
+Git worktrees use the separate `SCM_STORAGE_ROOT/workspaces/<sourceId>` tree.
+
+> **P4 Client Root:** a2wave does not rewrite the server-side Client Spec. For a managed
+> P4 source, configure the client's `Root` or an `AltRoots` entry to cover the resolved
+> local path shown after saving. **Check connection** displays the detected Client Root,
+> and managed sync refuses to start when the paths do not match.
 
 ## CodeGraph Indexing
 
@@ -66,6 +76,7 @@ Once CodeGraph is enabled, a2wave maintains the index automatically after the SC
 |------|---------|------|
 | Agent can't select the SCM Source | Initial sync not completed | Sync successfully once first |
 | Sync error | Credentials/network/branch doesn't exist | Investigate with "Check connection", confirm the PAT and branch |
+| P4 Client Root does not cover local path | The server-side P4 Client Spec points at a host path or another container path | Set `Root`/`AltRoots` to the resolved `/data/workspace/sources/...` path, or recreate the source with a mounted custom path |
 | Deleting a worktree returns 409 | It is in use | Wait for the corresponding Run to finish or release it, then delete |
 | workspacesPath not taking effect | Not absolute, outside `SCM_WORKSPACES_ALLOWED_ROOTS`, overlaps protected platform storage, or conflicts with another source | Use a unique path under the default workspaces directory or ask the operator to approve a dedicated worktree volume |
 | `Unsafe saved workspacesPath` on an upgraded source | A legacy custom root is no longer authorized for its current owner | Update the source to the default directory or an operator-approved dedicated root before using workspaces |

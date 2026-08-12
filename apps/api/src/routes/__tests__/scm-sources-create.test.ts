@@ -119,6 +119,20 @@ beforeEach(() => {
 describe('POST /scm-sources — credential normalization', () => {
   const SENTINEL = '********'
 
+  it('allocates managed local and worktree paths when localPath is omitted', async () => {
+    const app = await buildApp()
+    const res = await create(app, {
+      name: 'managed repo',
+      type: 'git',
+      config: { type: 'git', repoUrl: 'https://github.com/org/repo.git' },
+    })
+
+    expect(res.status).toBe(201)
+    expect(insertedValues.current?.localPath).toMatch(/sources\//)
+    expect(insertedValues.current?.workspacesPath).toMatch(/workspaces\//)
+    expect(insertedValues.current?.localPath).not.toBe(insertedValues.current?.workspacesPath)
+  })
+
   it('rejects the retired setupScript field instead of silently discarding it', async () => {
     const app = await buildApp()
     const res = await create(app, {

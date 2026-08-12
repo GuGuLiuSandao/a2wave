@@ -95,6 +95,31 @@ npm i -g a2wave
 a2wave setup
 ```
 
+To deploy with the bundled PostgreSQL container:
+
+```bash
+a2wave setup \
+  --yes \
+  --with-postgres \
+  --dir "$HOME/a2wave" \
+  --port 3502
+```
+
+The CLI automatically selects the versioned image matching its own release. Keep
+the install directory stable across upgrades: the version belongs in the CLI and
+image, not in `$HOME/a2wave`. PostgreSQL support is currently experimental; see
+[Database Backend](#database-backend) before using it in production.
+
+The generated deployment includes a dedicated `a2wave-workspace` volume. New Git
+and P4 sources use managed paths there automatically, so nobody needs to create or
+guess a directory inside the container. Operators can still set
+`A2WAVE_WORKSPACE_DIR` when direct host access is required.
+
+> [!NOTE]
+> PostgreSQL setup flags were added after CLI v0.7.2 and are not present in the
+> published `a2wave@0.7.2` package. Before using this command, verify that
+> `a2wave setup --help` lists `--with-postgres`.
+
 ## Quick Start (Docker)
 
 From a clone, building the image yourself:
@@ -122,7 +147,6 @@ publish it — the in-app manual at `/wiki` walks through the first one end to e
 > without it.
 >
 > ```bash
-> A2WAVE_WORKSPACE_DIR=$HOME/a2wave-workspace
 > A2WAVE_RUN_AS_UID=10001
 > A2WAVE_RUN_AS_GID=10001
 > ```

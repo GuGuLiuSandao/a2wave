@@ -58,7 +58,7 @@ Reusable instruction set that defines agent capabilities. Skills are stored in t
 
 ## SCM Source (Source Code Management)
 
-Represents a version control repository that provides a managed working directory for Agents. Supports **Perforce P4** and **Git**. Each SCM Source has a unique `localPath` (absolute path) and type-specific configuration.
+Represents a version control repository that provides a managed working directory for Agents. Supports **Perforce P4** and **Git**. Each SCM Source persists a unique absolute `localPath`; create requests may omit it so the server allocates `SCM_STORAGE_ROOT/sources/<sourceIdSuffix>`, while an explicit absolute path remains available for operator-mounted storage.
 
 ### Initial Sync and Agent Selectability
 

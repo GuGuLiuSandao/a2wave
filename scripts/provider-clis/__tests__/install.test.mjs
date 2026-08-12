@@ -354,6 +354,16 @@ test('entrypoint creates the install root without relying on the cached ownershi
   assert.match(entrypoint, /refusing to start: \$cli_path is a symlink/)
 })
 
+test('entrypoint makes a fresh managed SCM volume writable even without a UID remap', () => {
+  const entrypoint = readFileSync(resolve(root, 'docker-entrypoint.sh'), 'utf8')
+  const noRemap = entrypoint.indexOf('no remap needed')
+  const storageRoot = entrypoint.indexOf('SCM_STORAGE_ROOT="${SCM_STORAGE_ROOT:-')
+  assert.ok(storageRoot > noRemap, 'SCM ownership repair must run after both UID branches')
+  assert.match(entrypoint, /mkdir -p "\$SCM_STORAGE_ROOT"/)
+  assert.match(entrypoint, /chown -h "\$TARGET_UID:\$TARGET_GID" "\$SCM_STORAGE_ROOT"/)
+  assert.match(entrypoint, /refusing to start: \$SCM_STORAGE_ROOT is a symlink/)
+})
+
 // ---------------------------------------------------------------------------
 // Archive install atomicity
 //

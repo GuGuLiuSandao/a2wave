@@ -1,3 +1,4 @@
+import { runCommand } from 'citty'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockExistsSync = vi.fn<(p: string) => boolean>()
@@ -88,11 +89,19 @@ async function runSetup(args: Record<string, unknown> = {}): Promise<string> {
     lines.push(parts.join(' '))
   })
   try {
-    await (setupCommand.run as (ctx: { args: Record<string, unknown> }) => Promise<void>)({
+    await (
+      setupCommand.run as (ctx: {
+        args: Record<string, unknown>
+        rawArgs: string[]
+        cmd: typeof setupCommand
+      }) => Promise<void>
+    )({
       // Pin an explicit image so tests unrelated to image resolution do not
       // depend on the CLI's version-derived default; pass `image: undefined`
       // to exercise that default.
       args: { yes: true, image: 'a2wave:test', ...args },
+      rawArgs: [],
+      cmd: setupCommand,
     })
   } finally {
     spy.mockRestore()
@@ -114,6 +123,25 @@ describe('a2wave setup', () => {
     mockExecSync.mockReturnValue('')
     // health check succeeds immediately by default
     mockFetch.mockResolvedValue(new Response(JSON.stringify({ status: 'ok' }), { status: 200 }))
+  })
+
+  it('rejects an unknown option before running preflight or writing install files', async () => {
+    await expect(
+      runCommand(setupCommand, {
+        rawArgs: [
+          '--yes',
+          '--with-postgress',
+          '--no-start',
+          '--dir',
+          '/tmp/a2wave',
+          '--image',
+          'a2wave:test',
+        ],
+      }),
+    ).rejects.toThrow(/Unknown option.*--with-postgress/)
+
+    expect(mockExecSync).not.toHaveBeenCalled()
+    expect(mockWriteFileSync).not.toHaveBeenCalled()
   })
 
   afterEach(() => {

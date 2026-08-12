@@ -36,6 +36,7 @@ import {
   scmConfigEquals,
 } from '../lib/scm-secret-mask.js'
 import { createScmSource } from '../lib/scm-source.js'
+import { defaultScmLocalPath } from '../lib/scm-storage.js'
 import {
   validateScmWorkspacesRoot,
   validateStoredScmWorkspacesRoot,
@@ -163,7 +164,9 @@ app.post('/', async (c) => {
     return c.json({ error: 'Source type does not match config type' }, 400)
   }
 
-  const { localPath, workspacesPath } = parsed.data
+  const { workspacesPath } = parsed.data
+  const id = createId('scm')
+  const localPath = parsed.data.localPath ?? defaultScmLocalPath(id)
 
   // 验证 localPath 是绝对路径
   if (!isAbsolute(localPath)) {
@@ -191,7 +194,6 @@ app.post('/', async (c) => {
     )
   }
 
-  const id = createId('scm')
   const now = new Date()
   const userId = getCurrentUserId(c)
 
@@ -717,7 +719,7 @@ app.post('/:id/check', async (c) => {
 
   if (source.type === 'p4') {
     const config = source.config as unknown as P4Config
-    const result = await checkP4Connection(config)
+    const result = await checkP4Connection(config, source.localPath)
     return c.json({ data: result })
   }
 

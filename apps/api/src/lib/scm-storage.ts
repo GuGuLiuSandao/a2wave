@@ -1,0 +1,17 @@
+import { join } from 'node:path'
+import { env } from '../env.js'
+
+/** Preserve the entire createId random segment, including embedded underscores. */
+export function scmSourceIdSuffix(sourceId: string): string {
+  const underscore = sourceId.indexOf('_')
+  const suffix = underscore >= 0 ? sourceId.slice(underscore + 1) : sourceId
+  return suffix || sourceId
+}
+
+export function defaultScmLocalPath(sourceId: string): string {
+  return join(env.SCM_STORAGE_ROOT, 'sources', scmSourceIdSuffix(sourceId))
+}
+
+export function defaultScmWorkspacesPath(sourceId: string): string {
+  return join(env.SCM_STORAGE_ROOT, 'workspaces', scmSourceIdSuffix(sourceId))
+}

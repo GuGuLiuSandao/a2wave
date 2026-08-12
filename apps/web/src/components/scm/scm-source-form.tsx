@@ -137,6 +137,7 @@ const codegraphStatusLabelKeys: Record<string, string> = {
 type FormData = {
   name: string
   description: string
+  storageMode: 'managed' | 'custom'
   localPath: string
   workspacesPath: string
   isEnabled: boolean
@@ -234,6 +235,7 @@ export function ScmSourceForm({ sourceId, onSaved, onDeleted }: Props) {
     defaultValues: {
       name: '',
       description: '',
+      storageMode: 'managed',
       localPath: '',
       workspacesPath: '',
       isEnabled: true,
@@ -276,6 +278,7 @@ export function ScmSourceForm({ sourceId, onSaved, onDeleted }: Props) {
       reset({
         name: source.name,
         description: source.description ?? '',
+        storageMode: 'custom',
         localPath: source.localPath,
         workspacesPath: source.workspacesPath ?? '',
         isEnabled: source.isEnabled ?? true,
@@ -339,7 +342,9 @@ export function ScmSourceForm({ sourceId, onSaved, onDeleted }: Props) {
       // Trimmed to match what the validator checked: it tests `value.trim()`, so
       // submitting the raw value let "  /srv/repo" pass the form and then fail
       // the API's node:path.isAbsolute with a 400.
-      localPath: data.localPath.trim(),
+      ...(!isCreateMode || data.storageMode === 'custom'
+        ? { localPath: data.localPath.trim() }
+        : {}),
       workspacesPath: scmType === 'git' ? data.workspacesPath.trim() || null : null,
       isEnabled: data.isEnabled,
     }
@@ -458,6 +463,7 @@ export function ScmSourceForm({ sourceId, onSaved, onDeleted }: Props) {
   // Only one of the two can be active for a given mode, so the first message wins.
   const saveError = createSource.error ?? updateSource.error ?? null
   const codegraphEnabled = watch('codegraphEnabled')
+  const storageMode = watch('storageMode')
 
   // A result describes the exact connection parameters that were probed, so any
   // change to them invalidates it — clear rather than leave a stale ✓ next to
@@ -619,12 +625,9 @@ export function ScmSourceForm({ sourceId, onSaved, onDeleted }: Props) {
     <div className="space-y-6">
       {/* Basic Info */}
       <section className="space-y-4">
-        <div className="space-y-1">
-          <h3 className="text-base font-semibold text-foreground">
-            {t('scmSources.detail.basicInfo')}
-          </h3>
-          <p className="text-sm text-muted-foreground">{t('scmSources.detail.basicInfoDesc')}</p>
-        </div>
+        <h3 className="text-base font-semibold text-foreground">
+          {t('scmSources.detail.basicInfo')}
+        </h3>
         {/* Type Selector (create mode only) */}
         {isCreateMode && (
           <div className="flex flex-col items-start gap-1.5">
@@ -677,7 +680,7 @@ export function ScmSourceForm({ sourceId, onSaved, onDeleted }: Props) {
             </div>
           </div>
         )}
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className={cn('grid gap-4', !isCreateMode && 'sm:grid-cols-2')}>
           <div className="space-y-2">
             <Label htmlFor="name" required>
               {t('scmSources.detail.nameLabel')}
@@ -693,28 +696,118 @@ export function ScmSourceForm({ sourceId, onSaved, onDeleted }: Props) {
             />
             {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="localPath" required>
-              {t('scmSources.detail.localPathLabel')}
-            </Label>
-            <Input
-              id="localPath"
-              placeholder="/path/to/workspace"
-              className="font-mono text-sm"
-              {...register('localPath', {
-                required: t('scmSources.detail.localPathRequired'),
-                // The API rejects a relative path too, but only in English and
-                // only after a round-trip. Catch it here so the message is
-                // translated and lands on the field that caused it.
-                validate: (value) =>
-                  isAbsolutePath(value) || t('scmSources.detail.localPathAbsolute'),
-              })}
-            />
-            {errors.localPath && (
-              <p className="text-xs text-destructive">{errors.localPath.message}</p>
-            )}
-          </div>
+          {!isCreateMode && (
+            <div className="space-y-2">
+              <Label htmlFor="localPath">{t('scmSources.detail.localPathLabel')}</Label>
+              <Input
+                id="localPath"
+                readOnly
+                className="font-mono text-sm bg-muted"
+                {...register('localPath')}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t('scmSources.detail.savedPathHint')}
+              </p>
+            </div>
+          )}
         </div>
+        {isCreateMode && (
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium leading-none text-foreground">
+              {t('scmSources.detail.storageModeLabel')}
+            </legend>
+            <div role="radiogroup">
+              <div className="overflow-hidden rounded-lg border border-border bg-card">
+                <label
+                  htmlFor="storage-managed"
+                  className={cn(
+                    'flex w-full cursor-pointer items-start gap-3 px-3.5 py-3 transition-colors',
+                    storageMode === 'managed' ? 'bg-primary/5' : 'hover:bg-muted/40',
+                  )}
+                >
+                  <input
+                    id="storage-managed"
+                    type="radio"
+                    name="storageMode"
+                    value="managed"
+                    checked={storageMode === 'managed'}
+                    onChange={() =>
+                      setValue('storageMode', 'managed', {
+                        shouldDirty: true,
+                      })
+                    }
+                    className="mt-1 h-4 w-4 shrink-0 accent-primary"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium text-foreground">
+                        {t('scmSources.detail.storageManaged')}
+                      </span>
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium leading-4 text-primary">
+                        {t('scmSources.detail.storageRecommended')}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                      {t('scmSources.detail.storageManagedHint')}
+                    </p>
+                  </div>
+                </label>
+                <div
+                  data-storage-choice="custom"
+                  className={cn(
+                    'border-t border-border px-3.5 py-3 transition-colors sm:flex sm:items-center sm:gap-4',
+                    storageMode === 'custom' ? 'bg-primary/5' : 'hover:bg-muted/40',
+                  )}
+                >
+                  <label
+                    htmlFor="storage-custom"
+                    className="flex min-w-0 cursor-pointer items-start gap-3 sm:w-72 sm:shrink-0"
+                  >
+                    <input
+                      id="storage-custom"
+                      type="radio"
+                      name="storageMode"
+                      value="custom"
+                      checked={storageMode === 'custom'}
+                      onChange={() =>
+                        setValue('storageMode', 'custom', {
+                          shouldDirty: true,
+                        })
+                      }
+                      className="mt-1 h-4 w-4 shrink-0 accent-primary"
+                    />
+                    <div className="min-w-0">
+                      <span className="text-sm font-medium text-foreground">
+                        {t('scmSources.detail.storageCustom')}
+                      </span>
+                      <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                        {t('scmSources.detail.storageCustomHint')}
+                      </p>
+                    </div>
+                  </label>
+                  {storageMode === 'custom' && (
+                    <div className="mt-3 min-w-0 flex-1 sm:mt-0">
+                      <Input
+                        id="localPath"
+                        aria-label={t('scmSources.detail.localPathLabel')}
+                        placeholder="/data/workspace/sources/my-repo"
+                        className="font-mono text-sm"
+                        {...register('localPath', {
+                          required: t('scmSources.detail.localPathRequired'),
+                          validate: (value) =>
+                            isAbsolutePath(value) || t('scmSources.detail.localPathAbsolute'),
+                        })}
+                      />
+                      {errors.localPath && (
+                        <p className="mt-1 text-xs text-destructive">{errors.localPath.message}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </fieldset>
+        )}
         <div className="space-y-2">
           <Label htmlFor="description">{t('scmSources.detail.descriptionLabel')}</Label>
           <Textarea
@@ -1139,20 +1232,27 @@ export function ScmSourceForm({ sourceId, onSaved, onDeleted }: Props) {
       {checkSource.data?.data && (
         <div
           className={cn(
-            'rounded-lg border px-4 py-3 flex items-center gap-2 text-sm',
+            'rounded-lg border px-4 py-3 space-y-1 text-sm',
             checkSource.data.data.ok ? 'border-success/30' : 'border-destructive/30',
           )}
         >
-          {checkSource.data.data.ok ? (
-            <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
-          ) : (
-            <XCircle className="h-4 w-4 text-destructive shrink-0" />
-          )}
-          <span>{checkSource.data.data.message}</span>
-          {checkSource.data.data.serverVersion && (
-            <span className="text-muted-foreground ml-2">
-              ({checkSource.data.data.serverVersion})
-            </span>
+          <div className="flex items-center gap-2">
+            {checkSource.data.data.ok ? (
+              <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
+            ) : (
+              <XCircle className="h-4 w-4 text-destructive shrink-0" />
+            )}
+            <span>{checkSource.data.data.message}</span>
+            {checkSource.data.data.serverVersion && (
+              <span className="text-muted-foreground ml-2">
+                ({checkSource.data.data.serverVersion})
+              </span>
+            )}
+          </div>
+          {checkSource.data.data.clientRoot && (
+            <p className="pl-6 font-mono text-xs text-muted-foreground">
+              {t('scmSources.detail.p4ClientRoot')}: {checkSource.data.data.clientRoot}
+            </p>
           )}
         </div>
       )}

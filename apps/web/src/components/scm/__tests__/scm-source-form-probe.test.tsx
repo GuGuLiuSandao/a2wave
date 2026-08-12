@@ -58,6 +58,7 @@ const MULTI_REPO_RESULT = { data: MULTI_REPO_SOURCE, isPending: false, error: nu
 const EMPTY_RESULT = { data: undefined, isPending: false, error: null }
 
 const probeMock = vi.fn(idleMutation)
+const createMock = vi.fn(idleMutation)
 const sourceMock = vi.fn(() => GIT_RESULT)
 
 vi.mock('@/hooks/use-scm-sources', () => ({
@@ -68,7 +69,7 @@ vi.mock('@/hooks/use-scm-sources', () => ({
     isLoading: false,
     refetch: vi.fn(),
   })),
-  useCreateScmSource: vi.fn(() => idleMutation()),
+  useCreateScmSource: (...args: unknown[]) => createMock(...(args as [])),
   useUpdateScmSource: vi.fn(() => idleMutation()),
   useDeleteScmSource: vi.fn(() => idleMutation()),
   useSyncScmSource: vi.fn(() => idleMutation()),
@@ -96,10 +97,46 @@ beforeEach(async () => {
   await i18n.changeLanguage('en')
   vi.clearAllMocks()
   probeMock.mockImplementation(idleMutation)
+  createMock.mockImplementation(idleMutation)
   sourceMock.mockImplementation(() => GIT_RESULT)
 })
 
 describe('ScmSourceForm — connection probe', () => {
+  it('uses managed storage by default and submits no localPath', async () => {
+    sourceMock.mockImplementation(() => EMPTY_RESULT as never)
+    const mutate = vi.fn()
+    createMock.mockImplementation(() => ({ ...idleMutation(), mutate }))
+    const user = userEvent.setup()
+    renderForm(undefined)
+
+    expect(screen.getByText(/Managed storage/i)).toBeInTheDocument()
+    expect(
+      screen.queryByText('Basic source information and local path configuration'),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^Local Path/i)).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText(/^Name/i), 'Managed repo')
+    await user.type(screen.getByLabelText(/Repository URL/i), 'https://example.com/new.git')
+    await user.click(screen.getByRole('button', { name: /^Create$/i }))
+
+    expect(mutate).toHaveBeenCalledWith(
+      expect.not.objectContaining({ localPath: expect.anything() }),
+      expect.anything(),
+    )
+  })
+
+  it('keeps the custom path input inside the custom storage choice', async () => {
+    sourceMock.mockImplementation(() => EMPTY_RESULT as never)
+    renderForm(undefined)
+
+    const customStorage = screen.getByRole('radio', { name: /Custom path/i })
+    fireEvent.click(customStorage)
+
+    const customStorageRow = customStorage.closest('[data-storage-choice="custom"]')
+    expect(customStorageRow).not.toBeNull()
+    expect(screen.getByLabelText(/^Local Path/i)).toBeInTheDocument()
+    expect(customStorageRow).toContainElement(screen.getByLabelText(/^Local Path/i))
+  })
+
   it('offers the probe button in create mode, before a source exists', () => {
     sourceMock.mockImplementation(() => EMPTY_RESULT as never)
     renderForm(undefined)

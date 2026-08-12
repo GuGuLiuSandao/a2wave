@@ -95,6 +95,22 @@ else
   echo "[entrypoint] appuser UID/GID already ${CURRENT_UID}:${CURRENT_GID}, no remap needed"
 fi
 
+# A fresh Docker named volume is created as root:root even when appuser's UID did
+# not change, so ownership repair cannot live only in the remap branch above.
+# Refuse links before the root-phase chown; following a service-user-controlled
+# link here could change ownership outside the dedicated SCM volume.
+SCM_STORAGE_ROOT="${SCM_STORAGE_ROOT:-/home/appuser/.a2wave}"
+if [ -L "$SCM_STORAGE_ROOT" ]; then
+  echo "[entrypoint] refusing to start: $SCM_STORAGE_ROOT is a symlink" >&2
+  exit 1
+fi
+mkdir -p "$SCM_STORAGE_ROOT"
+if [ ! -d "$SCM_STORAGE_ROOT" ] || [ -L "$SCM_STORAGE_ROOT" ]; then
+  echo "[entrypoint] refusing to start: $SCM_STORAGE_ROOT is not a regular directory" >&2
+  exit 1
+fi
+chown -h "$TARGET_UID:$TARGET_GID" "$SCM_STORAGE_ROOT"
+
 # Runtime install root for Provider CLIs (see the A2WAVE_CLI_INSTALL_ROOT comment in the Dockerfile).
 # These are chowned here rather than relying on the ownership repair below: that block is guarded by
 # a marker cache, so on a second boot it is skipped entirely and any newly created directory would

@@ -5,6 +5,7 @@ import { env } from '../env.js'
 import { createId } from './id.js'
 import { logger } from './logger.js'
 import { getOidcEnv, oauthChannelAudiences } from './oidc.js'
+import { defaultScmLocalPath } from './scm-storage.js'
 
 const ADMIN_USER_ID = 'usr_admin'
 
@@ -69,10 +70,10 @@ async function bootstrapScmP4(): Promise<void> {
     await db.select().from(scmSources).where(eq(scmSources.name, 'env:p4')).limit(1)
   )[0]
 
-  const localPath = env.SCM_P4_LOCAL_PATH
   const now = new Date()
 
   if (existing) {
+    const localPath = env.SCM_P4_LOCAL_PATH || existing.localPath
     const localPathConflict =
       localPath !== existing.localPath
         ? (
@@ -98,6 +99,8 @@ async function bootstrapScmP4(): Promise<void> {
       .where(eq(scmSources.id, existing.id))
     logger.info({ id: existing.id }, 'Updated P4 SCM source from env')
   } else {
+    const id = createId('scm')
+    const localPath = env.SCM_P4_LOCAL_PATH || defaultScmLocalPath(id)
     const conflict = (
       await db.select().from(scmSources).where(eq(scmSources.localPath, localPath)).limit(1)
     )[0]
@@ -106,7 +109,6 @@ async function bootstrapScmP4(): Promise<void> {
       return
     }
 
-    const id = createId('scm')
     await db.insert(scmSources).values({
       id,
       name: 'env:p4',
@@ -141,10 +143,10 @@ async function bootstrapScmGit(): Promise<void> {
     await db.select().from(scmSources).where(eq(scmSources.name, 'env:git')).limit(1)
   )[0]
 
-  const localPath = env.SCM_GIT_LOCAL_PATH
   const now = new Date()
 
   if (existing) {
+    const localPath = env.SCM_GIT_LOCAL_PATH || existing.localPath
     const localPathConflict =
       localPath !== existing.localPath
         ? (
@@ -170,6 +172,8 @@ async function bootstrapScmGit(): Promise<void> {
       .where(eq(scmSources.id, existing.id))
     logger.info({ id: existing.id }, 'Updated Git SCM source from env')
   } else {
+    const id = createId('scm')
+    const localPath = env.SCM_GIT_LOCAL_PATH || defaultScmLocalPath(id)
     const conflict = (
       await db.select().from(scmSources).where(eq(scmSources.localPath, localPath)).limit(1)
     )[0]
@@ -178,7 +182,6 @@ async function bootstrapScmGit(): Promise<void> {
       return
     }
 
-    const id = createId('scm')
     await db.insert(scmSources).values({
       id,
       name: 'env:git',

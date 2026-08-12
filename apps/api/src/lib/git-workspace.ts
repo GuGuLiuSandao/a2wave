@@ -12,11 +12,11 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import type { GitConfig, WorktreeCleanup } from '@a2wave/shared'
 import { logger } from './logger.js'
+import { defaultScmWorkspacesPath } from './scm-storage.js'
 
 const execFileAsyncRaw = promisify(execFile)
 
@@ -117,16 +117,14 @@ export class WorktreeDirtyError extends Error {
 // ============================================================
 
 /**
- * 默认 workspacesPath：~/.a2wave/workspaces/<sourceIdSuffix>
+ * 默认 workspacesPath：SCM_STORAGE_ROOT/workspaces/<sourceIdSuffix>
  *
  * 取 sourceId 第一个 '_' 之后的完整随机段（`scm_` 前缀去掉）。
  * 用 slice 而不是 split('_').pop()，因为 createId 的 base64url 字母表含 '_'，
  * pop 会丢失前缀之外的前几段熵、造成跨 source 的 wsRoot 冲突。
  */
 export function defaultWorkspacesPath(sourceId: string): string {
-  const underscoreIdx = sourceId.indexOf('_')
-  const suffix = underscoreIdx >= 0 ? sourceId.slice(underscoreIdx + 1) : sourceId
-  return join(homedir(), '.a2wave', 'workspaces', suffix || sourceId)
+  return defaultScmWorkspacesPath(sourceId)
 }
 
 // ============================================================

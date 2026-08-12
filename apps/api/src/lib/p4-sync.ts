@@ -1,10 +1,12 @@
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
+import { isAbsolute, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import type { GitConfig, P4Config } from '@a2wave/shared'
 import { and, eq, ne } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { scmSources } from '../db/schema.js'
+import { env } from '../env.js'
 import { isCodegraphEnabled, runCodegraphIndex } from './codegraph-index.js'
 import { executeGitSync, sanitizeCredentials } from './git-sync.js'
 import { logger } from './logger.js'
@@ -83,13 +85,60 @@ export interface P4CheckResult {
   ok: boolean
   message: string
   serverVersion?: string
+  clientRoot?: string
+}
+
+export function parseP4ClientRoots(spec: string): string[] {
+  const roots: string[] = []
+  let readingAltRoots = false
+  for (const line of spec.split(/\r?\n/)) {
+    const root = line.match(/^Root:\s*(.+)$/)?.[1]?.trim()
+    if (root) {
+      roots.push(root)
+      readingAltRoots = false
+      continue
+    }
+    if (/^AltRoots:\s*$/.test(line)) {
+      readingAltRoots = true
+      continue
+    }
+    if (readingAltRoots && /^\s+\S/.test(line)) {
+      roots.push(line.trim())
+      continue
+    }
+    if (/^\S[^:]*:/.test(line)) readingAltRoots = false
+  }
+  return roots.filter(isAbsolute)
+}
+
+export function p4ClientRootCoversPath(localPath: string, roots: string[]): boolean {
+  const candidate = resolve(localPath)
+  return roots.some((root) => {
+    const child = relative(resolve(root), candidate)
+    return child === '' || (!child.startsWith('..') && !isAbsolute(child))
+  })
+}
+
+async function getP4ClientRoots(config: P4Config): Promise<string[]> {
+  const { stdout } = await execFileAsync('p4', ['client', '-o', config.p4client], {
+    env: { ...process.env, ...buildP4Env(config) },
+    timeout: 15_000,
+  })
+  return parseP4ClientRoots(stdout)
+}
+
+function isManagedLocalPath(localPath: string): boolean {
+  return p4ClientRootCoversPath(localPath, [`${resolve(env.SCM_STORAGE_ROOT)}/sources`])
 }
 
 /**
  * 检测 P4 连接是否可用
  * 先 p4 login，再执行 `p4 info` 并验证返回结果
  */
-export async function checkP4Connection(config: P4Config): Promise<P4CheckResult> {
+export async function checkP4Connection(
+  config: P4Config,
+  localPath?: string,
+): Promise<P4CheckResult> {
   try {
     await p4Login(config)
     const { stdout } = await execFileAsync('p4', ['info'], {
@@ -100,6 +149,17 @@ export async function checkP4Connection(config: P4Config): Promise<P4CheckResult
     // 从 p4 info 输出中提取 Server version
     const versionMatch = stdout.match(/Server version:\s*(.+)/i)
     const serverVersion = versionMatch?.[1]?.trim()
+    const clientRoots = await getP4ClientRoots(config)
+    const clientRoot = clientRoots[0]
+
+    if (localPath && clientRoots.length > 0 && !p4ClientRootCoversPath(localPath, clientRoots)) {
+      return {
+        ok: false,
+        message: `P4 client Root does not cover local path "${localPath}". Configure Root or AltRoots to include it.`,
+        serverVersion,
+        clientRoot,
+      }
+    }
 
     // 检查是否有有效的连接
     if (stdout.includes('Server address:') || stdout.includes('Server root:')) {
@@ -107,6 +167,7 @@ export async function checkP4Connection(config: P4Config): Promise<P4CheckResult
         ok: true,
         message: 'P4 connection is healthy',
         serverVersion,
+        clientRoot,
       }
     }
 
@@ -141,6 +202,24 @@ export async function executeP4Sync(
   localPath: string,
   timeoutMs: number = EXEC_TIMEOUT_MS,
 ): Promise<P4SyncResult> {
+  if (isManagedLocalPath(localPath)) {
+    try {
+      await p4Login(config)
+      const roots = await getP4ClientRoots(config)
+      if (!p4ClientRootCoversPath(localPath, roots)) {
+        return {
+          ok: false,
+          message: `P4 sync failed: client Root does not cover managed local path "${localPath}". Configure Root or AltRoots to include it.`,
+        }
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        message: `P4 sync failed: could not read client Root — ${sanitizeCredentials(error instanceof Error ? error.message : String(error))}`,
+      }
+    }
+  }
+
   // 确保本地目录存在
   if (!existsSync(localPath)) {
     mkdirSync(localPath, { recursive: true })

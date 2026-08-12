@@ -15,6 +15,7 @@ import { createInterface } from 'node:readline/promises'
 import { defineCommand } from 'citty'
 import { loadConfig, saveConfig } from '../config.js'
 import { CliError } from '../errors.js'
+import { assertKnownOptions } from '../lib/args.js'
 import { submitInitialAdminPassword } from '../lib/initial-admin.js'
 import { readSecret } from '../lib/prompt.js'
 import {
@@ -1329,6 +1330,10 @@ export const setupCommand = defineCommand({
     },
   },
   run: async (ctx) => {
+    assertKnownOptions(
+      ctx.rawArgs ?? [],
+      (ctx.cmd.args ?? {}) as Record<string, { alias?: string | string[] }>,
+    )
     const args = (ctx?.args ?? {}) as {
       dir?: string
       port?: string

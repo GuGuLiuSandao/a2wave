@@ -75,7 +75,9 @@ import {
   executeP4Sync,
   initAutoSyncSchedulers,
   isCheckoutBusy,
+  p4ClientRootCoversPath,
   p4Login,
+  parseP4ClientRoots,
   releaseCheckout,
   startAutoSync,
   stopAllAutoSync,
@@ -83,6 +85,21 @@ import {
   syncScmSource,
   tryAcquireCheckout,
 } from '../p4-sync.js'
+
+describe('P4 client roots', () => {
+  it('parses Root and AltRoots from a client spec', () => {
+    expect(
+      parseP4ClientRoots(
+        'Client: c\nRoot: /data/workspace/sources/main\nAltRoots:\n\t/mnt/p4\n\t/opt/p4\nView:\n\t//depot/... //c/...\n',
+      ),
+    ).toEqual(['/data/workspace/sources/main', '/mnt/p4', '/opt/p4'])
+  })
+
+  it('accepts a checkout inside Root and rejects an unrelated container path', () => {
+    expect(p4ClientRootCoversPath('/data/workspace/sources/main', ['/data/workspace'])).toBe(true)
+    expect(p4ClientRootCoversPath('/data/workspace/sources/main', ['/srv/p4'])).toBe(false)
+  })
+})
 
 // Cast to a loose shape — execFile has multiple overloads, so the typed
 // mockImplementation rejects the generic (...args: unknown[]) adapter used

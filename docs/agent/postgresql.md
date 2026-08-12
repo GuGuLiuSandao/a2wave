@@ -46,6 +46,12 @@ than one replica behind a load balancer — or you want your existing database
 backup, replication and monitoring to cover a2wave — PostgreSQL is the direction,
 with the experimental caveat above.
 
+PostgreSQL shares database state only. SCM checkouts and Git worktrees remain
+filesystem state: the Compose `a2wave-workspace` named volume is appropriate for
+one API container, while replicas must mount the same RWX-capable PVC at the same
+`SCM_STORAGE_ROOT` path. Node-local volumes would give each replica a different
+checkout even though they share the same SCM Source row.
+
 ### ⚠️ Startup recovery is not replica-aware — read this before running replicas
 
 **A second replica starting up will fail every run the first one is executing.**
@@ -111,6 +117,11 @@ a2wave setup --yes --database-url postgres://a2wave:pw@db.internal:5432/a2wave
 # install's .env (0600) and wired into DATABASE_URL
 a2wave setup --yes --with-postgres
 ```
+
+> [!NOTE]
+> These setup flags were added after CLI v0.7.2 and are not present in the
+> published `a2wave@0.7.2` package. Confirm that `a2wave setup --help` lists
+> `--with-postgres` before using them.
 
 The generated compose file reads `DATABASE_URL=${DATABASE_URL:-/app/data/a2wave.db}`
 from the install's `.env`, so switching an existing install is a one-line `.env`
