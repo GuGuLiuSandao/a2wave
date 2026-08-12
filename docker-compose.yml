@@ -52,6 +52,9 @@ services:
       - DATABASE_POOL_MAX=${DATABASE_POOL_MAX:-10}
       - A2WAVE_SKILLS_STORAGE=/app/data/skills
       - SCM_STORAGE_ROOT=${SCM_STORAGE_ROOT:-/data/workspace}
+      # Empty means Compose used the historical default bind. An explicit host
+      # path must never have its mount-root ownership changed by the container.
+      - A2WAVE_SCM_BIND_SOURCE=${A2WAVE_WORKSPACE_DIR:-}
       # Runtime install root for Provider CLIs. Left empty, the image default
       # /home/appuser/.a2wave applies (already on PATH). Point it at a different mounted volume
       # and the process adds that directory to PATH at startup.

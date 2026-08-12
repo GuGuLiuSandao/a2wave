@@ -68,4 +68,17 @@ describe('runCli', () => {
     expect(runMain).not.toHaveBeenCalled()
     logSpy.mockRestore()
   })
+
+  it('does not treat a free-text --version value as the global version flag', () => {
+    vi.mocked(runMain).mockClear()
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    runCli(['chat', 'send', 'my-agent', '-m', '--version'])
+
+    expect(runMain).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ rawArgs: ['chat', 'send', 'my-agent', '-m', '--version'] }),
+    )
+    expect(log).not.toHaveBeenCalled()
+  })
 })

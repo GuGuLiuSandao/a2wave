@@ -163,6 +163,25 @@ describe('ScmSourceForm — connection probe', () => {
     expect(screen.getByText('Local path is required')).toBeInTheDocument()
   })
 
+  it('probes P4 root coverage using the current local path', async () => {
+    sourceMock.mockImplementation(() => EMPTY_RESULT as never)
+    const mutate = vi.fn()
+    probeMock.mockImplementation(() => ({ ...idleMutation(), mutate }))
+    const user = userEvent.setup()
+    renderForm(undefined)
+
+    await user.click(screen.getByText('Perforce (P4)'))
+    await user.type(screen.getByLabelText(/^Local Path/i), '/data/p4/client-a')
+    await user.type(screen.getByLabelText(/P4PORT/i), 'ssl:p4.example.com:1666')
+    await user.type(screen.getByLabelText(/P4USER/i), 'builder')
+    await user.type(screen.getByLabelText(/P4CLIENT/i), 'client-a')
+    await user.click(screen.getByRole('button', { name: /Test Connection/i }))
+
+    expect(mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'p4', localPath: '/data/p4/client-a' }),
+    )
+  })
+
   it('allows an existing P4 source path to be repaired in place', () => {
     sourceMock.mockImplementation(() => P4_RESULT as never)
     renderForm('scm_p4')

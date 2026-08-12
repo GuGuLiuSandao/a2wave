@@ -82,6 +82,17 @@ describe('git-workspace', () => {
       expect(a).toMatch(/\/ABC_XYZ$/)
       expect(b).toMatch(/\/DEF_XYZ$/)
     })
+
+    it('recovers the historical default when that per-source directory still exists', () => {
+      const legacyPath = defaultWorkspacesPath('scm_legacy', () => true)
+      expect(legacyPath).toMatch(/\.a2wave\/workspaces\/legacy$/)
+    })
+
+    it('uses managed storage when no historical per-source directory exists', () => {
+      const managedPath = defaultWorkspacesPath('scm_fresh', () => false)
+      expect(managedPath).toContain('workspaces')
+      expect(managedPath).toMatch(/\/fresh$/)
+    })
   })
 
   describe('createGitWorkspace — single repo', () => {

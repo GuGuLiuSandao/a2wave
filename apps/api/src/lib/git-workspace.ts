@@ -12,6 +12,7 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import type { GitConfig, WorktreeCleanup } from '@a2wave/shared'
@@ -123,8 +124,13 @@ export class WorktreeDirtyError extends Error {
  * 用 slice 而不是 split('_').pop()，因为 createId 的 base64url 字母表含 '_'，
  * pop 会丢失前缀之外的前几段熵、造成跨 source 的 wsRoot 冲突。
  */
-export function defaultWorkspacesPath(sourceId: string): string {
-  return defaultScmWorkspacesPath(sourceId)
+export function defaultWorkspacesPath(
+  sourceId: string,
+  pathExists: (path: string) => boolean = existsSync,
+): string {
+  const suffix = sourceId.includes('_') ? sourceId.slice(sourceId.indexOf('_') + 1) : sourceId
+  const legacyPath = join(homedir(), '.a2wave', 'workspaces', suffix || sourceId)
+  return pathExists(legacyPath) ? legacyPath : defaultScmWorkspacesPath(sourceId)
 }
 
 // ============================================================

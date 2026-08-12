@@ -415,9 +415,17 @@ export function ScmSourceForm({ sourceId, onSaved, onDeleted }: Props) {
     } else if (!data.p4port.trim() || !data.p4user.trim() || !data.p4client.trim()) {
       setProbeValidationError(t('scmSources.detail.probeNeedsP4Fields'))
       return
+    } else if (!data.localPath.trim()) {
+      setProbeValidationError(t('scmSources.detail.localPathRequired'))
+      return
     }
 
-    probeSource.mutate({ type: scmType, config: buildConfig(data), sourceId })
+    probeSource.mutate({
+      type: scmType,
+      config: buildConfig(data),
+      sourceId,
+      ...(scmType === 'p4' ? { localPath: data.localPath.trim() } : {}),
+    })
   }
 
   const handleSync = () => {

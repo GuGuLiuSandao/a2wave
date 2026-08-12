@@ -31,6 +31,7 @@ export type P4CheckResult = {
 export type ProbeScmSourceInput = {
   type: ScmSourceType
   config: ScmSourceConfig
+  localPath?: string
   /**
    * Id of the source the form was loaded from, when editing. Lets the server
    * resolve credentials the form round-tripped as masked placeholders. Omitted

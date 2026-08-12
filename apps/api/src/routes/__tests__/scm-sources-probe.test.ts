@@ -60,10 +60,12 @@ function conditionColumns(condition: unknown): string[] {
 vi.mock('../../lib/git-sync.js', () => ({ checkGitConnection: mockCheckGit }))
 
 vi.mock('../../lib/p4-sync.js', () => ({
+  cancelInitialScmSync: vi.fn(() => Promise.resolve(false)),
   checkP4Connection: mockCheckP4,
   isCheckoutBusy: vi.fn(() => false),
   releaseCheckout: vi.fn(),
   startAutoSync: vi.fn(),
+  startInitialScmSync: vi.fn(),
   stopAutoSync: vi.fn(),
   syncScmSource: vi.fn(),
   tryAcquireCheckout: vi.fn(() => true),
@@ -128,6 +130,7 @@ describe('POST /scm-sources/probe', () => {
     const app = await buildApp()
     const res = await probe(app, {
       type: 'p4',
+      localPath: '/data/p4/client-a',
       config: {
         type: 'p4',
         p4port: 'ssl:perforce:1666',
@@ -138,7 +141,10 @@ describe('POST /scm-sources/probe', () => {
     })
 
     expect(res.status).toBe(200)
-    expect(mockCheckP4).toHaveBeenCalledWith(expect.objectContaining({ p4user: 'alice' }))
+    expect(mockCheckP4).toHaveBeenCalledWith(
+      expect.objectContaining({ p4user: 'alice' }),
+      '/data/p4/client-a',
+    )
   })
 
   it('resolves a masked pat from the stored source instead of dialing "********"', async () => {

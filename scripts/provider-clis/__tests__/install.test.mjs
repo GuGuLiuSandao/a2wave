@@ -354,13 +354,17 @@ test('entrypoint creates the install root without relying on the cached ownershi
   assert.match(entrypoint, /refusing to start: \$cli_path is a symlink/)
 })
 
-test('entrypoint makes a fresh managed SCM volume writable even without a UID remap', () => {
+test('entrypoint makes fresh root-owned SCM storage writable without changing user-owned binds', () => {
   const entrypoint = readFileSync(resolve(root, 'docker-entrypoint.sh'), 'utf8')
   const noRemap = entrypoint.indexOf('no remap needed')
   const storageRoot = entrypoint.indexOf('SCM_STORAGE_ROOT="${SCM_STORAGE_ROOT:-')
   assert.ok(storageRoot > noRemap, 'SCM ownership repair must run after both UID branches')
   assert.match(entrypoint, /mkdir -p "\$SCM_STORAGE_ROOT"/)
-  assert.match(entrypoint, /if \[ "\$\{A2WAVE_MANAGED_SCM_VOLUME:-false\}" = "true" \]; then/)
+  assert.match(entrypoint, /SCM_STORAGE_OWNER="\$\(stat -c '%u' "\$SCM_STORAGE_ROOT"\)"/)
+  assert.match(
+    entrypoint,
+    /"\$\{A2WAVE_MANAGED_SCM_VOLUME:-false\}" = "true".*-z "\$\{A2WAVE_SCM_BIND_SOURCE:-\}".*"\$SCM_STORAGE_OWNER" = "0"/s,
+  )
   assert.match(entrypoint, /chown -h "\$TARGET_UID:\$TARGET_GID" "\$SCM_STORAGE_ROOT"/)
   assert.match(entrypoint, /refusing to start: \$SCM_STORAGE_ROOT is a symlink/)
 })
@@ -369,6 +373,7 @@ test('root Compose does not opt a host bind mount into SCM root ownership change
   const compose = readFileSync(resolve(root, 'docker-compose.yml'), 'utf8')
 
   assert.doesNotMatch(compose, /A2WAVE_MANAGED_SCM_VOLUME/)
+  assert.match(compose, /A2WAVE_SCM_BIND_SOURCE=\$\{A2WAVE_WORKSPACE_DIR:-\}/)
 })
 
 // ---------------------------------------------------------------------------

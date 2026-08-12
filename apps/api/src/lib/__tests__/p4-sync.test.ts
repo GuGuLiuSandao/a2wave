@@ -2,6 +2,7 @@ import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
 import type { P4Config } from '@a2wave/shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { env } from '../../env.js'
 
 // Chainable DB mock
 const { mockDb, mockNotifyScmSyncError, mockExecuteGitSync, mockRunCodegraphIndex } = vi.hoisted(
@@ -71,6 +72,7 @@ vi.mock('../logger.js', () => ({
 
 import { asyncQuery } from '../../test/async-query.js'
 import {
+  cancelInitialScmSync,
   checkP4Connection,
   executeP4Sync,
   initAutoSyncSchedulers,
@@ -80,6 +82,7 @@ import {
   parseP4ClientRoots,
   releaseCheckout,
   startAutoSync,
+  startInitialScmSync,
   stopAllAutoSync,
   stopAutoSync,
   syncScmSource,
@@ -93,6 +96,14 @@ describe('P4 client roots', () => {
         'Client: c\nRoot: /data/workspace/sources/main\nAltRoots:\n\t/mnt/p4\n\t/opt/p4\nView:\n\t//depot/... //c/...\n',
       ),
     ).toEqual(['/data/workspace/sources/main', '/mnt/p4', '/opt/p4'])
+  })
+
+  it('keeps the first AltRoot when it appears on the label line', () => {
+    expect(
+      parseP4ClientRoots(
+        'Client: c\nRoot: /data/p4\nAltRoots:\t/mnt/p4a\n\t/mnt/p4b\nView:\n\t//depot/... //c/...\n',
+      ),
+    ).toEqual(['/data/p4', '/mnt/p4a', '/mnt/p4b'])
   })
 
   it('accepts a checkout inside Root and rejects an unrelated container path', () => {
@@ -264,6 +275,29 @@ describe('executeP4Sync', () => {
     expect(mockExecFile).toHaveBeenCalled()
     expect(mockExecFile.mock.calls[0][0]).toBe('p4')
     expect(mockExecFile.mock.calls[0][1]).toEqual(['sync'])
+  })
+
+  it('continues to the real sync when managed-path root verification is unavailable', async () => {
+    const originalRoot = env.SCM_STORAGE_ROOT
+    env.SCM_STORAGE_ROOT = '/managed'
+    mockExecFile.mockImplementation((...args: unknown[]) => {
+      const commandArgs = args[1] as string[]
+      const cb = args[args.length - 1] as (
+        err: Error | null,
+        result?: { stdout: string; stderr: string },
+      ) => void
+      if (commandArgs[0] === 'client') cb(new Error('client spec timed out'))
+      else cb(null, { stdout: '', stderr: '' })
+    })
+
+    const result = await executeP4Sync(
+      { ...p4ConfigDefaults, p4port: 'p4:1666', p4user: 'u', p4client: 'c' },
+      '/managed/sources/source-a',
+    )
+
+    env.SCM_STORAGE_ROOT = originalRoot
+    expect(result.ok).toBe(true)
+    expect(mockExecFile.mock.calls.some((call) => (call[1] as string[])[0] === 'sync')).toBe(true)
   })
 
   it('creates localPath directory if it does not exist', async () => {
@@ -505,6 +539,37 @@ describe('syncScmSource', () => {
     const result = await syncScmSource('s1')
     expect(result.ok).toBe(true)
     expect(mockExecuteGitSync).toHaveBeenCalled()
+  })
+
+  it('aborts and waits for a cancellable automatic initial sync', async () => {
+    const source = {
+      id: 's1',
+      name: 'initial',
+      type: 'git',
+      config: { type: 'git', repoUrl: 'https://example.com/repo.git', branch: 'main' },
+      localPath: '/repo',
+      initialSyncCompletedAt: null,
+    }
+    mockDbSelectGet(source)
+    mockDbUpdate()
+    let receivedSignal: AbortSignal | undefined
+    mockExecuteGitSync.mockImplementation(
+      (_config: unknown, _path: string, _timeout: number, signal?: AbortSignal) => {
+        receivedSignal = signal
+        return new Promise((resolve) => {
+          signal?.addEventListener('abort', () =>
+            resolve({ ok: false, message: 'Git sync cancelled' }),
+          )
+        })
+      },
+    )
+
+    const running = startInitialScmSync('s1')
+    await vi.waitFor(() => expect(receivedSignal).toBeDefined())
+    await expect(cancelInitialScmSync('s1')).resolves.toBe(true)
+    await expect(running).resolves.toMatchObject({ ok: false })
+    expect(receivedSignal?.aborted).toBe(true)
+    expect(isCheckoutBusy('s1')).toBe(false)
   })
 
   it('starts CodeGraph indexing after successful sync when enabled', async () => {
@@ -1286,5 +1351,40 @@ describe('checkP4Connection — edge cases', () => {
     expect(result.message).toBe('P4 connection is healthy')
     expect(result.clientRootWarning).toContain('could not be verified')
     expect(result.clientRootWarning).not.toContain('hunter2')
+  })
+
+  it('treats an unknown client as a healthy connection with a setup warning', async () => {
+    makeSpawnMock(0)
+    mockExecFile.mockImplementation((...args: unknown[]) => {
+      const commandArgs = args[1] as string[]
+      const cb = args[args.length - 1] as (
+        err: Error | null,
+        result?: { stdout: string; stderr: string },
+      ) => void
+      if (commandArgs[0] === 'info') {
+        cb(null, {
+          stdout:
+            'Server address: p4.example.com:1666\nServer version: P4D/LINUX/2025.1\nClient unknown.\n',
+          stderr: '',
+        })
+      } else {
+        cb(null, { stdout: 'Root: /app', stderr: '' })
+      }
+    })
+
+    const result = await checkP4Connection(
+      {
+        ...p4ConfigDefaults,
+        p4port: 'ssl:p4.example.com:1666',
+        p4user: 'builder',
+        p4client: 'not-created-yet',
+      },
+      '/data/workspace/main',
+    )
+
+    expect(result.ok).toBe(true)
+    expect(result.clientRoot).toBeUndefined()
+    expect(result.clientRootWarning).toContain('not-created-yet')
+    expect(mockExecFile.mock.calls).toHaveLength(1)
   })
 })

@@ -21,10 +21,12 @@ import { createId } from '../lib/id.js'
 import { logger } from '../lib/logger.js'
 import { getCurrentUserId, getOwnerFilter } from '../lib/owner-filter.js'
 import {
+  cancelInitialScmSync,
   checkP4Connection,
   isCheckoutBusy,
   releaseCheckout,
   startAutoSync,
+  startInitialScmSync,
   stopAutoSync,
   syncScmSource,
   tryAcquireCheckout,
@@ -258,14 +260,15 @@ app.post('/', async (c) => {
       .returning()
   )[0]
 
-  // Auto-sync means the source should become usable without waiting for the
-  // first interval tick. Start the initial sync in the background, then keep
-  // the regular scheduler for subsequent refreshes. A source with auto-sync
-  // disabled remains explicitly manual.
+  // Initial checkout and periodic refresh are separate lifecycle concerns. An
+  // enabled source must become usable once even when recurring auto-sync is
+  // disabled; autoSync controls only subsequent interval ticks.
   const syncConfig = parsed.data.config as { autoSync?: boolean; syncIntervalMin?: number }
-  if (syncConfig.autoSync && syncConfig.syncIntervalMin) {
-    startAutoSync(id, syncConfig.syncIntervalMin)
-    void syncScmSource(id).catch((error) => {
+  if (newSource.isEnabled) {
+    if (syncConfig.autoSync && syncConfig.syncIntervalMin) {
+      startAutoSync(id, syncConfig.syncIntervalMin)
+    }
+    void startInitialScmSync(id).catch((error) => {
       logger.error({ sourceId: id, error }, 'Initial SCM sync failed')
     })
   }
@@ -287,7 +290,7 @@ app.patch('/:id', async (c) => {
   const { id } = c.req.param()
   const ownerFilter = getOwnerFilter(c, scmSources.userId)
   const conditions = ownerFilter ? and(eq(scmSources.id, id), ownerFilter) : eq(scmSources.id, id)
-  const existing = (await db.select().from(scmSources).where(conditions).limit(1))[0]
+  let existing = (await db.select().from(scmSources).where(conditions).limit(1))[0]
   if (!existing) {
     return c.json({ error: 'SCM source not found' }, 404)
   }
@@ -404,6 +407,13 @@ app.patch('/:id', async (c) => {
   // sync would later resurrect the initialSyncCompletedAt we null out here.
   const resetsSyncState = localPathChanged || configChanged
   if (resetsSyncState) {
+    // The create/update/recovery initial checkout is cancellable so a bad URL
+    // cannot lock its own repair form for the entire clone timeout. Manual and
+    // recurring syncs remain non-cancellable here and retain the 409 guard.
+    if (existing.initialSyncCompletedAt == null && (await cancelInitialScmSync(id))) {
+      existing = (await db.select().from(scmSources).where(conditions).limit(1))[0]
+      if (!existing) return c.json({ error: 'SCM source not found' }, 404)
+    }
     // The checkout stays busy after syncStatus returns to 'idle' while post-sync
     // indexing runs against the old localPath. Changing localPath/config
     // then would let that job finish writing the wrong tree and resurrect the
@@ -444,6 +454,11 @@ app.patch('/:id', async (c) => {
     if (syncConfig.autoSync && syncConfig.syncIntervalMin) {
       startAutoSync(id, syncConfig.syncIntervalMin)
     }
+    if (updated.initialSyncCompletedAt == null) {
+      void startInitialScmSync(id).catch((error) => {
+        logger.error({ sourceId: id, error }, 'Initial SCM sync after update failed')
+      })
+    }
   }
 
   logAudit(c, {
@@ -481,10 +496,30 @@ app.delete('/:id', async (c) => {
     return c.json({ error: `Cannot delete: referenced by agents: ${names}` }, 409)
   }
 
-  // 停止自动同步
-  stopAutoSync(id)
+  if (isCheckoutBusy(id)) {
+    return c.json({ error: 'Cannot delete an SCM source while its checkout is in use' }, 409)
+  }
 
-  const deleted = (await db.delete(scmSources).where(eq(scmSources.id, id)).returning())[0]
+  // Close the gap after the in-memory check: a sync or index may acquire its DB
+  // status before DELETE reaches the database. If it does, delete no row.
+  const deleteConditions = ownerFilter
+    ? and(
+        eq(scmSources.id, id),
+        ownerFilter,
+        ne(scmSources.syncStatus, 'syncing'),
+        ne(scmSources.codegraphStatus, 'indexing'),
+      )
+    : and(
+        eq(scmSources.id, id),
+        ne(scmSources.syncStatus, 'syncing'),
+        ne(scmSources.codegraphStatus, 'indexing'),
+      )
+  const deleted = (await db.delete(scmSources).where(deleteConditions).returning())[0]
+  if (!deleted) {
+    return c.json({ error: 'Cannot delete an SCM source while its checkout is in use' }, 409)
+  }
+
+  stopAutoSync(id)
 
   // Record the shape of what was removed: after a delete the row is gone, so the
   // audit entry is the only remaining answer to "what did that source point at".
@@ -505,6 +540,7 @@ app.delete('/:id', async (c) => {
 
 const probeScmSourceInput = z.object({
   type: scmSourceTypeEnum,
+  localPath: z.string().refine(isAbsolute, { message: 'localPath must be absolute' }).optional(),
   /**
    * Bounded to MAX_GIT_REPOS here rather than in `scmSourceConfigSchema`: this
    * is the path where an uncapped list turns into that many concurrent
@@ -648,7 +684,7 @@ app.post('/probe', probeScmRateLimit, async (c) => {
   // reflected back to the caller.
   const result =
     rehydrated.config.type === 'p4'
-      ? await checkP4Connection(rehydrated.config as P4Config)
+      ? await checkP4Connection(rehydrated.config as P4Config, parsed.data.localPath)
       : await checkGitConnection(rehydrated.config as GitConfig)
 
   // Probe writes no row and no run record, so this entry is the only trace an

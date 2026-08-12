@@ -70,8 +70,10 @@ vi.mock('../../lib/codegraph-index.js', () => ({
 }))
 
 vi.mock('../../lib/p4-sync.js', () => ({
+  cancelInitialScmSync: vi.fn().mockResolvedValue(false),
   checkP4Connection: vi.fn().mockResolvedValue({ ok: true, message: 'Connected' }),
   startAutoSync: vi.fn(),
+  startInitialScmSync: vi.fn().mockResolvedValue({ ok: true }),
   stopAutoSync: vi.fn(),
   syncScmSource: vi.fn().mockResolvedValue({ ok: true }),
   isCheckoutBusy: vi.fn().mockReturnValue(false),
@@ -147,13 +149,13 @@ function makeUpdateChain(
   }
 }
 
-function makeDeleteChain(result?: unknown) {
+function makeDeleteChain(result: unknown = { id: 'scm_test1' }) {
   return {
     where: vi.fn().mockReturnValue(
       asyncQuery({
         returning: vi.fn().mockReturnValue(
           asyncQuery({
-            get: vi.fn().mockReturnValue(result ?? { id: 'scm_test1' }),
+            get: vi.fn().mockReturnValue(result),
           }),
         ),
       }),
@@ -164,6 +166,7 @@ function makeDeleteChain(result?: unknown) {
 import { db } from '../../db/client.js'
 import { logAudit } from '../../lib/audit.js'
 import {
+  cancelInitialScmSync,
   isCheckoutBusy,
   releaseCheckout,
   syncScmSource,
@@ -461,9 +464,68 @@ describe('SCM Sources routes', () => {
       const res = await app.request('/api/scm-sources/scm_1', { method: 'DELETE' })
       expect(res.status).toBe(409)
     })
+
+    it('returns 409 while the checkout is being synced or indexed', async () => {
+      ;(db.select as Mock)
+        .mockReturnValueOnce(makeDbChain({ id: 'scm_1', name: 'Source' }))
+        .mockReturnValueOnce(makeDbChain([]))
+      ;(isCheckoutBusy as Mock).mockReturnValueOnce(true)
+
+      const res = await app.request('/api/scm-sources/scm_1', { method: 'DELETE' })
+
+      expect(res.status).toBe(409)
+      expect(db.delete).not.toHaveBeenCalled()
+    })
+
+    it('returns 409 when a sync wins the atomic delete race', async () => {
+      ;(db.select as Mock)
+        .mockReturnValueOnce(makeDbChain({ id: 'scm_1', name: 'Source' }))
+        .mockReturnValueOnce(makeDbChain([]))
+      ;(db.delete as Mock).mockReturnValue(makeDeleteChain(null))
+
+      const res = await app.request('/api/scm-sources/scm_1', { method: 'DELETE' })
+
+      expect(res.status).toBe(409)
+    })
   })
 
   describe('PATCH /:id', () => {
+    it('cancels and waits for an automatic initial sync before repairing its config', async () => {
+      const existingSource = {
+        id: 'scm_1',
+        name: 'Source',
+        localPath: '/data/repo',
+        workspacesPath: null,
+        isEnabled: true,
+        config: { type: 'git', repoUrl: 'https://bad.example/repo.git', branch: 'main' },
+        initialSyncCompletedAt: null,
+        syncStatus: 'syncing',
+      }
+      ;(cancelInitialScmSync as Mock).mockResolvedValueOnce(true)
+      ;(db.select as Mock)
+        .mockReturnValueOnce(makeDbChain(existingSource))
+        .mockReturnValueOnce(makeDbChain([]))
+        .mockReturnValueOnce(makeDbChain({ ...existingSource, syncStatus: 'error' }))
+      ;(db.update as Mock).mockReturnValue(
+        makeUpdateChain({
+          ...existingSource,
+          config: { type: 'git', repoUrl: 'https://good.example/repo.git', branch: 'main' },
+          syncStatus: 'idle',
+        }),
+      )
+
+      const res = await app.request('/api/scm-sources/scm_1', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          config: { type: 'git', repoUrl: 'https://good.example/repo.git', branch: 'main' },
+        }),
+      })
+
+      expect(res.status).toBe(200)
+      expect(cancelInitialScmSync).toHaveBeenCalledWith('scm_1')
+    })
+
     it('resets sync state when localPath changes', async () => {
       const existingSource = {
         id: 'scm_1',

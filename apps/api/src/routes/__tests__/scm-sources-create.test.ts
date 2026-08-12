@@ -64,10 +64,12 @@ vi.mock('../../db/client.js', () => ({
 
 vi.mock('../../lib/git-sync.js', () => ({ checkGitConnection: vi.fn() }))
 vi.mock('../../lib/p4-sync.js', () => ({
+  cancelInitialScmSync: vi.fn(() => Promise.resolve(false)),
   checkP4Connection: vi.fn(),
   isCheckoutBusy: vi.fn(() => false),
   releaseCheckout: vi.fn(),
   startAutoSync: vi.fn(),
+  startInitialScmSync: vi.fn(() => Promise.resolve()),
   stopAutoSync: vi.fn(),
   syncScmSource: vi.fn(() => Promise.resolve()),
   tryAcquireCheckout: vi.fn(() => true),
@@ -83,7 +85,7 @@ vi.mock('../../lib/logger.js', () => ({
 }))
 
 import { logAudit } from '../../lib/audit.js'
-import { startAutoSync, stopAutoSync, syncScmSource } from '../../lib/p4-sync.js'
+import { startAutoSync, startInitialScmSync, stopAutoSync } from '../../lib/p4-sync.js'
 
 import { asyncQuery } from '../../test/async-query.js'
 
@@ -168,11 +170,11 @@ describe('POST /scm-sources — credential normalization', () => {
 
     expect(res.status).toBe(201)
     expect(startAutoSync).toHaveBeenCalledOnce()
-    expect(syncScmSource).toHaveBeenCalledOnce()
-    expect(syncScmSource).toHaveBeenCalledWith(insertedValues.current?.id)
+    expect(startInitialScmSync).toHaveBeenCalledOnce()
+    expect(startInitialScmSync).toHaveBeenCalledWith(insertedValues.current?.id)
   })
 
-  it('leaves the initial sync manual when auto-sync is disabled', async () => {
+  it('starts the initial sync even when recurring auto-sync is disabled', async () => {
     const app = await buildApp()
     const res = await create(app, {
       name: 'manual-sync repo',
@@ -187,7 +189,26 @@ describe('POST /scm-sources — credential normalization', () => {
 
     expect(res.status).toBe(201)
     expect(startAutoSync).not.toHaveBeenCalled()
-    expect(syncScmSource).not.toHaveBeenCalled()
+    expect(startInitialScmSync).toHaveBeenCalledOnce()
+  })
+
+  it('does not sync or schedule a disabled source', async () => {
+    const app = await buildApp()
+    const res = await create(app, {
+      name: 'disabled repo',
+      type: 'git',
+      isEnabled: false,
+      config: {
+        type: 'git',
+        repoUrl: 'https://github.com/org/repo.git',
+        autoSync: true,
+        syncIntervalMin: 30,
+      },
+    })
+
+    expect(res.status).toBe(201)
+    expect(startAutoSync).not.toHaveBeenCalled()
+    expect(startInitialScmSync).not.toHaveBeenCalled()
   })
 
   it('rejects the retired setupScript field instead of silently discarding it', async () => {

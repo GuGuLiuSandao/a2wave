@@ -41,7 +41,7 @@ function buildP4Env(config: P4Config): Record<string, string> {
  * 执行 p4 login，将密码通过 stdin 传入，ticket 写入 $HOME/.p4tickets
  * 兼容 P4 2025 不再支持 P4PASSWD 环境变量的情况
  */
-export async function p4Login(config: P4Config): Promise<boolean> {
+export async function p4Login(config: P4Config, signal?: AbortSignal): Promise<boolean> {
   if (!config.p4passwd) {
     logger.debug('p4Login skipped: no p4passwd')
     return true
@@ -52,7 +52,7 @@ export async function p4Login(config: P4Config): Promise<boolean> {
     const child = spawn(
       'p4',
       ['-p', config.p4port, '-u', config.p4user, '-c', config.p4client, 'login'],
-      { env, stdio: ['pipe', 'pipe', 'pipe'] },
+      { env, stdio: ['pipe', 'pipe', 'pipe'], signal },
     )
 
     child.stdin.write(config.p4passwd, () => {
@@ -99,8 +99,11 @@ export function parseP4ClientRoots(spec: string): string[] {
       readingAltRoots = false
       continue
     }
-    if (/^AltRoots:\s*$/.test(line)) {
+    const altRoots = line.match(/^AltRoots:\s*(.*)$/)
+    if (altRoots) {
       readingAltRoots = true
+      const inlineRoot = altRoots[1]?.trim()
+      if (inlineRoot) roots.push(inlineRoot)
       continue
     }
     if (readingAltRoots && /^\s+\S/.test(line)) {
@@ -120,10 +123,11 @@ export function p4ClientRootCoversPath(localPath: string, roots: string[]): bool
   })
 }
 
-async function getP4ClientRoots(config: P4Config): Promise<string[]> {
+async function getP4ClientRoots(config: P4Config, signal?: AbortSignal): Promise<string[]> {
   const { stdout } = await execFileAsync('p4', ['client', '-o', config.p4client], {
     env: { ...process.env, ...buildP4Env(config) },
     timeout: 15_000,
+    signal,
   })
   return parseP4ClientRoots(stdout)
 }
@@ -152,6 +156,14 @@ export async function checkP4Connection(
     const serverVersion = versionMatch?.[1]?.trim()
     // 检查是否有有效的连接
     if (stdout.includes('Server address:') || stdout.includes('Server root:')) {
+      if (/^Client unknown\.\s*$/im.test(stdout)) {
+        return {
+          ok: true,
+          message: 'P4 connection is healthy',
+          serverVersion,
+          clientRootWarning: `P4 client "${config.p4client}" does not exist yet. Create it with a Root or AltRoots that covers the local path before syncing.`,
+        }
+      }
       let clientRoots: string[]
       try {
         clientRoots = await getP4ClientRoots(config)
@@ -211,22 +223,29 @@ export async function executeP4Sync(
   config: P4Config,
   localPath: string,
   timeoutMs: number = EXEC_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<P4SyncResult> {
   if (isManagedLocalPath(localPath)) {
     try {
-      await p4Login(config)
-      const roots = await getP4ClientRoots(config)
-      if (!p4ClientRootCoversPath(localPath, roots)) {
+      await p4Login(config, signal)
+      const roots = await getP4ClientRoots(config, signal)
+      if (roots.length > 0 && !p4ClientRootCoversPath(localPath, roots)) {
         return {
           ok: false,
           message: `P4 sync failed: client Root does not cover managed local path "${localPath}". Configure Root or AltRoots to include it.`,
         }
       }
     } catch (error) {
-      return {
-        ok: false,
-        message: `P4 sync failed: could not read client Root — ${sanitizeCredentials(error instanceof Error ? error.message : String(error))}`,
+      if (signal?.aborted) {
+        return { ok: false, message: 'P4 sync cancelled' }
       }
+      logger.warn(
+        {
+          localPath,
+          error: sanitizeCredentials(error instanceof Error ? error.message : String(error)),
+        },
+        'P4 client Root could not be verified before sync; continuing with p4 sync',
+      )
     }
   }
 
@@ -238,12 +257,13 @@ export async function executeP4Sync(
   const syncArgs = config.depotPath ? ['sync', `${config.depotPath}...`] : ['sync']
 
   try {
-    await p4Login(config)
+    await p4Login(config, signal)
     const { stdout, stderr } = await execFileAsync('p4', syncArgs, {
       env: { ...process.env, ...buildP4Env(config) },
       cwd: localPath,
       timeout: timeoutMs,
       maxBuffer: EXEC_MAX_BUFFER,
+      signal,
     })
 
     const output = stdout + stderr
@@ -312,6 +332,32 @@ export interface ScmSyncResult {
  * try-acquire is atomic without extra synchronisation.
  */
 const busyCheckouts = new Set<string>()
+const activeInitialSyncs = new Map<
+  string,
+  { controller: AbortController; promise: Promise<ScmSyncResult> }
+>()
+
+/** Start one cancellable background initial checkout for create/update/recovery. */
+export function startInitialScmSync(sourceId: string): Promise<ScmSyncResult> {
+  const active = activeInitialSyncs.get(sourceId)
+  if (active) return active.promise
+
+  const controller = new AbortController()
+  const promise = syncScmSource(sourceId, { signal: controller.signal }).finally(() => {
+    if (activeInitialSyncs.get(sourceId)?.promise === promise) activeInitialSyncs.delete(sourceId)
+  })
+  activeInitialSyncs.set(sourceId, { controller, promise })
+  return promise
+}
+
+/** Cancel only the automatic initial checkout, never a manual or recurring sync. */
+export async function cancelInitialScmSync(sourceId: string): Promise<boolean> {
+  const active = activeInitialSyncs.get(sourceId)
+  if (!active) return false
+  active.controller.abort()
+  await active.promise
+  return true
+}
 
 /** Whether a sync or its post-sync work is currently writing this checkout. */
 export function isCheckoutBusy(sourceId: string): boolean {
@@ -365,7 +411,11 @@ async function releasePreAcquiredSync(sourceId: string, message: string): Promis
  */
 export async function syncScmSource(
   sourceId: string,
-  options: { statusAlreadyAcquired?: boolean; checkoutAlreadyAcquired?: boolean } = {},
+  options: {
+    statusAlreadyAcquired?: boolean
+    checkoutAlreadyAcquired?: boolean
+    signal?: AbortSignal
+  } = {},
 ): Promise<ScmSyncResult> {
   // Take the ONE per-source checkout lock first, synchronously, before any
   // await. This is the single authoritative gate shared by every writer — the
@@ -403,7 +453,7 @@ export async function syncScmSource(
  */
 async function runSyncUnderCheckoutLock(
   sourceId: string,
-  options: { statusAlreadyAcquired?: boolean },
+  options: { statusAlreadyAcquired?: boolean; signal?: AbortSignal },
 ): Promise<ScmSyncResult> {
   // Acquire the DB status lock BEFORE reading the config the worker will act on,
   // so the snapshot is consistent with the acquired row. Reading first would let
@@ -470,10 +520,14 @@ async function runSyncUnderCheckoutLock(
   try {
     if (source.type === 'p4') {
       const config = source.config as unknown as P4Config
-      result = await executeP4Sync(config, source.localPath, timeoutMs)
+      result = options.signal
+        ? await executeP4Sync(config, source.localPath, timeoutMs, options.signal)
+        : await executeP4Sync(config, source.localPath, timeoutMs)
     } else if (source.type === 'git') {
       const config = source.config as unknown as GitConfig
-      result = await executeGitSync(config, source.localPath, timeoutMs)
+      result = options.signal
+        ? await executeGitSync(config, source.localPath, timeoutMs, options.signal)
+        : await executeGitSync(config, source.localPath, timeoutMs)
     } else {
       result = { ok: false, message: `Unsupported SCM type: ${source.type}` }
     }
@@ -621,6 +675,8 @@ export function stopAllAutoSync(): void {
   }
   syncTimers.clear()
   inFlightAutoSyncs.clear()
+  for (const sync of activeInitialSyncs.values()) sync.controller.abort()
+  activeInitialSyncs.clear()
   busyCheckouts.clear()
 }
 
@@ -688,6 +744,11 @@ export async function initAutoSyncSchedulers(): Promise<void> {
     const config = source.config as unknown as { autoSync?: boolean; syncIntervalMin?: number }
     if (config.autoSync && config.syncIntervalMin) {
       startAutoSync(source.id, config.syncIntervalMin)
+    }
+    if (source.initialSyncCompletedAt == null) {
+      void startInitialScmSync(source.id).catch((error) => {
+        logger.error({ sourceId: source.id, error }, 'Recovered initial SCM sync failed')
+      })
     }
   }
 

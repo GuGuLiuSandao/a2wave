@@ -51,10 +51,13 @@ export function handleError(err: unknown): never {
 }
 
 export function runCli(rawArgs: string[]): void {
-  // citty only recognizes --version when it is the sole argument. Keep this a
-  // global flag at any depth and never execute the operational subcommand it
-  // happens to follow.
-  if (rawArgs.includes('--version')) {
+  // citty only recognizes --version when it is the sole raw argument. Preserve
+  // the documented compatibility form `a2wave setup --version` without
+  // scanning option values such as `chat send -m "--version"`.
+  if (
+    rawArgs[0] === '--version' ||
+    (rawArgs.length === 2 && rawArgs[0] === 'setup' && rawArgs[1] === '--version')
+  ) {
     console.log(getVersion())
     return
   }

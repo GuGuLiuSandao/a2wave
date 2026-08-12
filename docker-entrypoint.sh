@@ -109,7 +109,10 @@ if [ ! -d "$SCM_STORAGE_ROOT" ] || [ -L "$SCM_STORAGE_ROOT" ]; then
   echo "[entrypoint] refusing to start: $SCM_STORAGE_ROOT is not a regular directory" >&2
   exit 1
 fi
-if [ "${A2WAVE_MANAGED_SCM_VOLUME:-false}" = "true" ]; then
+SCM_STORAGE_OWNER="$(stat -c '%u' "$SCM_STORAGE_ROOT")"
+if [ "${A2WAVE_MANAGED_SCM_VOLUME:-false}" = "true" ] || {
+  [ -z "${A2WAVE_SCM_BIND_SOURCE:-}" ] && [ "$SCM_STORAGE_OWNER" = "0" ]
+}; then
   chown -h "$TARGET_UID:$TARGET_GID" "$SCM_STORAGE_ROOT"
 fi
 
