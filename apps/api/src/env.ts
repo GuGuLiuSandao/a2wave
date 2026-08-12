@@ -11,6 +11,7 @@ loadDotenvFiles()
 
 const DEFAULT_AUTH_SECRET = 'dev-secret-change-me'
 const MIN_AUTH_SECRET_LENGTH = 32
+const DEFAULT_HOME_DIR = process.env.HOME?.trim() || homedir()
 
 function isValidTrustedProxyAddress(value: string): boolean {
   if (isIP(value)) return true
@@ -329,7 +330,7 @@ export const envSchema = z
     A2WAVE_MEMORY_STORAGE: z.string().default('./data/memory'),
 
     /** Root for server-managed SCM checkouts and Git worktrees. */
-    SCM_STORAGE_ROOT: stringEnv(z.string().default(path.join(homedir(), '.a2wave'))),
+    SCM_STORAGE_ROOT: stringEnv(z.string().default(path.join(DEFAULT_HOME_DIR, '.a2wave'))),
 
     /**
      * Comma-separated absolute roots under which custom SCM workspacesPath
