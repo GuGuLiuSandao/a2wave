@@ -5,10 +5,11 @@ All notable changes to this project are documented in this file.
 ## v0.7.3-rc.1
 
 > 🚧 **Release candidate.** Feature-complete and green on the full suite, but with no
-> production soak time. The Docker `latest` tag does **not** move to it, and no GitHub
-> Release is published for a prerelease tag — pull `ghcr.io/lilithgames/a2wave:0.7.3-rc.1`
-> or install the exact npm version explicitly. Try it in a staging environment and report
-> back; the stable cut will ship as `v0.7.3`.
+> production soak time. It is published as a GitHub pre-release, so the `Latest` badge
+> stays on the newest stable version; the Docker `latest` tag does not move to it either.
+> Pull `ghcr.io/lilithgames/a2wave:0.7.3-rc.1` or install the exact npm version
+> explicitly. Try it in a staging environment and report back; the stable cut will ship
+> as `v0.7.3`.
 
 > ⚠️ **This release is not rolling-upgrade safe. Stop every API replica before
 > applying its migrations, then start only the upgraded version.** Two
