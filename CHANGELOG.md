@@ -2,7 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## v0.7.3-rc.1
+
+> 🚧 **Release candidate.** Feature-complete and green on the full suite, but with no
+> production soak time. The Docker `latest` tag does **not** move to it, and no GitHub
+> Release is published for a prerelease tag — pull `ghcr.io/lilithgames/a2wave:0.7.3-rc.1`
+> or install the exact npm version explicitly. Try it in a staging environment and report
+> back; the stable cut will ship as `v0.7.3`.
 
 > ⚠️ **This release is not rolling-upgrade safe. Stop every API replica before
 > applying its migrations, then start only the upgraded version.** Two
@@ -20,6 +26,16 @@ All notable changes to this project are documented in this file.
 - **Managed SCM storage for Git sources**: `localPath` is now optional for Git and allocated under the managed storage root; P4 still requires an explicit path covered by its client `Root`. Existing bind mounts, source paths and legacy worktree roots survive the upgrade.
 - **Cross-replica workspace recovery**: a crashed or unreachable replica no longer strands its checkouts. Processes publish a liveness heartbeat, and a surviving replica settles the abandoned workload, releases its lease, and converges the leftover worktree removal — work that previously required an operator to run SQL by hand. An instance that cannot renew its own heartbeat stops itself before peers may reclaim its workspaces.
 - **PostgreSQL deployment path**: `a2wave setup` can provision a PostgreSQL 16 sidecar or point at an external server. Still experimental and not recommended for production; there is no SQLite → PostgreSQL data migration.
+- **Invitation links replace admin-set passwords**: administrators issue an expiring single-use link instead of typing someone else's password, and the invitee chooses their own and lands signed in. Links are copyable and revocable from the invitations drawer, and re-inviting an address supersedes the outstanding link so only one is ever live.
+- **Git SCM Agents no longer share a working directory**: each Agent runs in its own worktree, where previously a run of one Agent could delete files a concurrent run of another was executing against. A worktree with unmerged agent commits or local modifications stays pinned (with a warning) and resumes following the source branch once that work lands upstream.
+- **GitLab triggers can watch an entire group**: name a namespace instead of enumerating repositories, and newly created repositories are picked up with no config edit.
+- **The CLI is now an agent-first entry point**: commands and output are shaped for a local Agent to drive directly, rather than for hand-typing.
+- **The agent's Publish tab is now Channels**: a more accurate name for what it manages — API, Feishu, Slack, schedules, repository triggers and the rest.
+- **A2A calls preserve caller provenance across hops**: run records show the full `user · calling Agent · source` chain even after a remote multi-hop invocation.
+- **Chat and run recovery fixes**: restored chats accept follow-ups again, run state recovers and refreshes correctly after a server restart, and interrupted A2A remote tasks are resumable.
+- **Feishu and Slack no longer process a message twice**: deduplication keys on the message's own identity rather than the delivery envelope, so one message starts one run.
+- **Windows fixes**: Codex multiline prompts are preserved, and CLI status probes work.
+- **Credentials survive an edit**: saving a form no longer persists the masked placeholder over the real secret.
 
 ## v0.7.2
 
