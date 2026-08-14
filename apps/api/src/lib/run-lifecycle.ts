@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import {
   type RunChannelContextDiscord,
+  type RunChannelContextQQOfficial,
   type RunChannelContextSlack,
   artifactPolicySchema,
 } from '@a2wave/shared'
@@ -22,9 +23,11 @@ import { buildArtifactLinkLines } from './artifact-links.js'
 import { type RegisteredArtifact, scanAndRegisterArtifacts } from './artifact-storage.js'
 import { executeChatRun } from './execute-chat-run.js'
 import { buildFeishuFallbackText } from './feishu-fallback.js'
+import { isPerAgentWorkspaceName } from './git-workspace.js'
 import { createId } from './id.js'
 import { jsonPathIsAbsent, jsonSet } from './json-sql.js'
 import { logger } from './logger.js'
+import { isNativeChatChannel } from './native-chat-channel.js'
 import { appendNativeArtifactDownloadSection } from './native-chat-text.js'
 import { createScmSource } from './scm-source.js'
 import { notifyRunError } from './webhook-notifier.js'
@@ -327,17 +330,35 @@ function sendNativeChatReplyByContext(
   output: string | undefined,
   artifacts: RegisteredArtifact[] = [],
 ): void {
-  const channel = context?.channel as RunChannelContextSlack | RunChannelContextDiscord | undefined
-  if (channel?.channel_type !== 'slack' && channel?.channel_type !== 'discord') return
+  const channel = context?.channel as
+    | RunChannelContextSlack
+    | RunChannelContextDiscord
+    | RunChannelContextQQOfficial
+    | undefined
+  if (
+    channel?.channel_type !== 'slack' &&
+    channel?.channel_type !== 'discord' &&
+    channel?.channel_type !== 'qq_official'
+  )
+    return
   const replyText = output?.trim() ? output : buildNativeChatFallbackText(runId)
   const send =
     channel.channel_type === 'slack'
       ? import('./slack-service.js').then(({ slackConnectionManager }) =>
           slackConnectionManager.sendRunResultByContext(agentId, channel, replyText, artifacts),
         )
-      : import('./discord-service.js').then(({ discordConnectionManager }) =>
-          discordConnectionManager.sendRunResultByContext(agentId, channel, replyText, artifacts),
-        )
+      : channel.channel_type === 'discord'
+        ? import('./discord-service.js').then(({ discordConnectionManager }) =>
+            discordConnectionManager.sendRunResultByContext(agentId, channel, replyText, artifacts),
+          )
+        : import('./qq-official-service.js').then(({ qqOfficialConnectionManager }) =>
+            qqOfficialConnectionManager.sendRunResultByContext(
+              agentId,
+              channel,
+              replyText,
+              artifacts,
+            ),
+          )
   void send.catch((err) =>
     logger.warn(
       { err, runId, agentId, channel: channel.channel_type },
@@ -542,20 +563,18 @@ export async function finishRunSuccess(
       const context = await loadStepContext(stepId)
       successContext = context
       const hasOutput = !!result.output?.trim()
-      // When output is empty, persist the fallback (with run_id) ONLY for runs the
-      // user actually saw it on — Feishu runs (WS bot, or API/rerun reply-by-context).
-      // For non-Feishu runs (web / CLI / gateway API) keep the original output so we
-      // don't inject a Feishu-flavored fallback into unrelated chat history.
+      // When output is empty, persist the fallback (with run_id) only for chat-channel
+      // runs where the user actually sees it. Other runs keep the original output so
+      // channel-specific fallback copy does not leak into unrelated chat history.
       const channelType = (context?.channel as { channel_type?: string } | undefined)?.channel_type
+      const isNativeChat = isNativeChatChannel(channelType)
       const isChatChannel =
         channelType === 'feishu' ||
-        channelType === 'slack' ||
-        channelType === 'discord' ||
+        isNativeChat ||
         (!!context?.receive_id_type && !!context?.receive_id)
-      const fallbackContent =
-        channelType === 'slack' || channelType === 'discord'
-          ? buildNativeChatFallbackText(runId)
-          : buildFeishuFallbackText(runId)
+      const fallbackContent = isNativeChat
+        ? buildNativeChatFallbackText(runId)
+        : buildFeishuFallbackText(runId)
       persistedContent = hasOutput || !isChatChannel ? result.output : fallbackContent
       await db.insert(chatMessages).values({
         id: msgId,
@@ -595,7 +614,7 @@ export async function finishRunSuccess(
         const links = await buildArtifactLinkLines(registered, userId ?? null, artifactPolicy)
         const channelType = (successContext?.channel as { channel_type?: string } | undefined)
           ?.channel_type
-        if (!result.output?.trim() && (channelType === 'slack' || channelType === 'discord')) {
+        if (!result.output?.trim() && isNativeChatChannel(channelType)) {
           persistedContent = ''
         }
         persistedContent = appendNativeArtifactDownloadSection(persistedContent, links)
@@ -702,7 +721,7 @@ async function finishRunFailure(
       const failureContext = await loadStepContext(stepId)
       const failureChannelType = (failureContext?.channel as { channel_type?: string } | undefined)
         ?.channel_type
-      const isNativeChatFailure = failureChannelType === 'slack' || failureChannelType === 'discord'
+      const isNativeChatFailure = isNativeChatChannel(failureChannelType)
       if ((failureContext?.receive_id_type && failureContext?.receive_id) || isNativeChatFailure) {
         const fallbackText = isNativeChatFailure
           ? buildNativeChatFallbackText(runId)
@@ -792,6 +811,19 @@ export async function cleanupWorktreeIfEphemeral(runId: string, agentId: string)
 
   const wtConfig = run.worktreeConfig as { name: string; cleanup: string }
   if (wtConfig.cleanup !== 'ephemeral') return
+
+  // A grandfathered sticky config may name a per-agent worktree. Run-end
+  // cleanup must not touch it at all: keeping the branch is not enough,
+  // deleting the directory would discard uncommitted work. The shape test, not
+  // just this Agent's own name — a config naming *another* Agent's worktree
+  // would otherwise hand that Agent's branch to `git branch -D`.
+  if (isPerAgentWorkspaceName(wtConfig.name)) {
+    logger.info(
+      { runId, agentId, workspace: wtConfig.name },
+      'Skipping ephemeral cleanup for the per-agent worktree',
+    )
+    return
+  }
 
   // 检查是否有其他 run 还在使用同一 workDir
   const occupied = (

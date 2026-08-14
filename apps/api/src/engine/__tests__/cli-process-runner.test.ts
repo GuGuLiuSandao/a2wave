@@ -6,12 +6,14 @@ import {
   type CliProcessRunOptions,
   CliProcessRunner,
   type CliProcessRunnerOptions,
+  createLineDecoder,
 } from '../cli-process-runner.js'
 import {
   _resetExecutionLeasesForTests,
   beginExecutionLease,
   cancelExecutionLease,
 } from '../execution-lease-registry.js'
+import { registerExecutionProcessLogSink } from '../execution-process-log.js'
 
 vi.mock('../../lib/logger.js', () => ({
   logger: { debug: vi.fn(), warn: vi.fn() },
@@ -38,6 +40,7 @@ function createHarness(
     spawnProcess,
     stderrLimitBytes: 16,
     platform: 'win32',
+    killWindowsProcessTree: (_pid, onComplete) => onComplete(false),
     ...runnerOverrides,
   })
   const options: CliProcessRunOptions = {
@@ -61,6 +64,43 @@ afterEach(() => {
 })
 
 describe('CliProcessRunner contract', () => {
+  it('drops an overlong unterminated line before retaining later process-log lines', () => {
+    const lines: string[] = []
+    const decoder = createLineDecoder((line) => lines.push(line), { maxLineChars: 64 })
+
+    decoder.write(Buffer.from('x'.repeat(65)))
+    decoder.write(Buffer.from('\nkept\n'))
+    decoder.flush()
+
+    expect(lines).toEqual(['kept'])
+  })
+
+  it('persists sanitized Agent Router lifecycle events from child stderr', async () => {
+    const sink = vi.fn()
+    const unregister = registerExecutionProcessLogSink('task_1', sink)
+    const { runner, children, options } = createHarness()
+    const execution = runner.run(options)
+
+    children[0].stderr.write(
+      '[agent-router] {"event":"a2a.task.cancel_result","target":"payment","taskId":"task-remote","state":"TASK_STATE_CANCELED","apiKey":"must-not-persist"}\n',
+    )
+    children[0].emit('close', 0)
+    await execution
+
+    expect(sink).toHaveBeenCalledWith({
+      type: 'system',
+      subtype: 'a2a.task.cancel_result',
+      metadata: {
+        target: 'payment',
+        taskId: 'task-remote',
+        state: 'TASK_STATE_CANCELED',
+      },
+      ts: expect.any(Number),
+    })
+    expect(JSON.stringify(sink.mock.calls)).not.toContain('must-not-persist')
+    unregister()
+  })
+
   it('does not spawn when its execution lease was cancelled during async preparation', async () => {
     const lease = beginExecutionLease('run_1', 'task_1', 'agt_1')
     cancelExecutionLease('run_1')
@@ -95,6 +135,21 @@ describe('CliProcessRunner contract', () => {
 
     expect(runner.cancel(options.taskId)).toBe(true)
     expect(signalProcess).toHaveBeenCalledWith(-1234, 'SIGTERM')
+    expect(children[0].kill).not.toHaveBeenCalled()
+
+    children[0].emit('close', null, 'SIGTERM')
+    await expect(execution).resolves.toMatchObject({ reason: 'cancelled' })
+  })
+
+  it('terminates the complete Windows process tree when cancelled', async () => {
+    const killWindowsProcessTree = vi.fn((_pid: number, onComplete: (success: boolean) => void) =>
+      onComplete(true),
+    )
+    const { runner, children, options } = createHarness({}, { killWindowsProcessTree })
+    const execution = runner.run(options)
+
+    expect(runner.cancel(options.taskId)).toBe(true)
+    expect(killWindowsProcessTree).toHaveBeenCalledWith(1234, expect.any(Function))
     expect(children[0].kill).not.toHaveBeenCalled()
 
     children[0].emit('close', null, 'SIGTERM')
@@ -312,6 +367,50 @@ describe('CliProcessRunner contract', () => {
     child.emit('close', null)
     await expect(cancellation).resolves.toBe(true)
     await expect(execution).resolves.toMatchObject({ reason: 'cancelled' })
+  })
+
+  it('waits for asynchronous Windows tree termination after the CLI leader closes', async () => {
+    let finishTreeTermination: ((success: boolean) => void) | undefined
+    const killWindowsProcessTree = vi.fn((_pid: number, onComplete: (success: boolean) => void) => {
+      finishTreeTermination = onComplete
+    })
+    const { runner, children, options } = createHarness({}, { killWindowsProcessTree })
+    const execution = runner.run(options)
+    let cancellationSettled = false
+
+    const cancellation = runner.cancelAndWait(options.taskId).then((result) => {
+      cancellationSettled = true
+      return result
+    })
+    children[0].emit('close', null, 'SIGTERM')
+    await Promise.resolve()
+
+    expect(cancellationSettled).toBe(false)
+    expect(runner.activeCount).toBe(1)
+
+    finishTreeTermination?.(true)
+    await expect(cancellation).resolves.toBe(true)
+    await expect(execution).resolves.toMatchObject({ reason: 'cancelled' })
+    expect(runner.activeCount).toBe(0)
+  })
+
+  it('waits for asynchronous Windows tree termination after the CLI leader errors', async () => {
+    let finishTreeTermination: ((success: boolean) => void) | undefined
+    const killWindowsProcessTree = vi.fn((_pid: number, onComplete: (success: boolean) => void) => {
+      finishTreeTermination = onComplete
+    })
+    const { runner, children, options } = createHarness({}, { killWindowsProcessTree })
+    const execution = runner.run(options)
+    const cancellation = runner.cancelAndWait(options.taskId)
+
+    children[0].emit('error', new Error('leader failed while cancelling'))
+    await Promise.resolve()
+    expect(runner.activeCount).toBe(1)
+
+    finishTreeTermination?.(true)
+    await expect(cancellation).resolves.toBe(true)
+    await expect(execution).resolves.toMatchObject({ reason: 'cancelled' })
+    expect(runner.activeCount).toBe(0)
   })
 
   it('shutdown terminates every task and waits for all processes to finalize', async () => {

@@ -1489,6 +1489,56 @@ describe('SCM Sources routes', () => {
       expect(res.status).toBe(409)
     })
 
+    it('keeps the branch when deleting a per-agent worktree, drops it otherwise', async () => {
+      // The entry an operator actually clicks: an idle `agent-*` row must not
+      // take the Agent's accumulated unmerged commits with it. The judgement is
+      // an exact match against an Agent bound to this source, so a legacy
+      // explicit workspace named `agent-refactor` keeps delete-branch semantics.
+      const removeWorkspace = vi.fn()
+      const runWithName = async (name: string) => {
+        removeWorkspace.mockClear()
+        ;(db.select as Mock)
+          .mockReturnValueOnce(makeDbChain({ id: 'scm_1', type: 'git' })) // source
+          .mockReturnValueOnce(makeDbChain(undefined)) // occupancy probe
+          .mockReturnValueOnce(makeDbChain([{ id: 'agt_abc123def456ghi7' }])) // bound agents
+        mockCreateScmSource.mockReturnValue({ wsRoot: '/workspaces/scm_1', removeWorkspace })
+        const res = await app.request(`/api/scm-sources/scm_1/workspaces/${name}`, {
+          method: 'DELETE',
+        })
+        expect(res.status).toBe(200)
+        return removeWorkspace.mock.calls[0]
+      }
+
+      expect(await runWithName('agent-abc123def456ghi7')).toEqual([
+        'agent-abc123def456ghi7',
+        { keepBranches: true },
+      ])
+      expect(await runWithName('agent-refactor')).toEqual([
+        'agent-refactor',
+        { keepBranches: false },
+      ])
+    })
+
+    it('keeps the branch of an orphaned per-agent worktree whose agent row is gone', async () => {
+      // Agent deletion leaves an occupied worktree behind on purpose, so the
+      // operator reclaims it here — after the row it would have matched against
+      // is already deleted. Falling back to the shape test is what stops that
+      // click from taking the unpushed commits with it.
+      const removeWorkspace = vi.fn()
+      ;(db.select as Mock)
+        .mockReturnValueOnce(makeDbChain({ id: 'scm_1', type: 'git' })) // source
+        .mockReturnValueOnce(makeDbChain(undefined)) // occupancy probe
+        .mockReturnValueOnce(makeDbChain([])) // no bound agents left
+      mockCreateScmSource.mockReturnValue({ wsRoot: '/workspaces/scm_1', removeWorkspace })
+
+      const res = await app.request('/api/scm-sources/scm_1/workspaces/agent-abc123def456ghi7', {
+        method: 'DELETE',
+      })
+
+      expect(res.status).toBe(200)
+      expect(removeWorkspace).toHaveBeenCalledWith('agent-abc123def456ghi7', { keepBranches: true })
+    })
+
     it.each([
       ['encoded-slash traversal', '/api/scm-sources/scm_1/workspaces/..%2Fevil'],
       ['encoded-slash absolute', '/api/scm-sources/scm_1/workspaces/%2Fetc%2Fpasswd'],

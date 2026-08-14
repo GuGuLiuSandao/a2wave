@@ -1,0 +1,1 @@
+ALTER TABLE "agents" ADD COLUMN "qq_official_config" jsonb;

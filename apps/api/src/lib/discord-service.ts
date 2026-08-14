@@ -61,7 +61,7 @@ function canReuseDiscordGatewayConnection(
 
 export function extractDiscordNativeAttachments(
   message: DiscordMessageSnapshot,
-): NativeChatAttachment[] {
+): Extract<NativeChatAttachment, { source: 'discord' }>[] {
   return (message.attachments ?? []).map((attachment) => ({
     source: 'discord' as const,
     remoteId: attachment.id,
@@ -255,6 +255,15 @@ export class DiscordConnectionManager {
           logger.warn(
             { error, agentId, messageId: message.id },
             'Failed to send Discord queue reply',
+          ),
+        )
+    } else if (result.status === 'scheduling_failed') {
+      await message
+        .reply('Agent could not schedule this message.')
+        .catch((error) =>
+          logger.warn(
+            { error, agentId, messageId: message.id },
+            'Failed to send Discord scheduling failure reply',
           ),
         )
     }

@@ -13,6 +13,7 @@ import {
   oauthAllowedEmailsSchema,
   publishAuthTypeEnum,
   publishChannelEnum,
+  qqOfficialConfigSchema,
   scheduleConfigSchema,
   slackConfigSchema,
   updateAgentInput,
@@ -69,6 +70,8 @@ import { buildExportZip } from '../lib/agent-export.js'
 import {
   WorktreeOccupiedError,
   buildAgentConfig,
+  removePerAgentWorkspace,
+  resolveCleanupWorkDirs,
   resolveEngineType,
   resolveWorkDir,
   validateAgentProviderConfiguration,
@@ -109,6 +112,7 @@ import {
 } from '../lib/oauth-publish.js'
 import { getCurrentUserId, getOwnerFilter } from '../lib/owner-filter.js'
 import { registerPendingContext } from '../lib/pending-job-registry.js'
+import { qqOfficialConnectionManager } from '../lib/qq-official-service.js'
 import {
   buildChatAppChannel,
   buildDebugChannel,
@@ -144,6 +148,12 @@ import {
   resyncGitTriggerAfterUpdate,
   syncGitTriggerChannels,
 } from './agent-git-trigger.js'
+import {
+  handleQQOfficialRegistration,
+  prepareQQOfficialPublishConfig,
+  resumeQQOfficialConnection,
+  syncQQOfficialConnectionAfterPublish,
+} from './agent-qq-official.js'
 import {
   maskA2ARouteTargetSecrets,
   maskSensitiveEnv,
@@ -319,6 +329,13 @@ export function maskAgentSecrets<T extends AgentRow | undefined>(
       discordConfig: { ...discord, botToken: '********' },
     }
   }
+  const qqOfficial = masked.qqOfficialConfig
+  if (!opts?.revealNativeChatSecrets && qqOfficial?.appSecret) {
+    masked = {
+      ...masked,
+      qqOfficialConfig: { ...qqOfficial, appSecret: MASKED_SECRET },
+    }
+  }
   return masked as T
 }
 
@@ -447,12 +464,15 @@ app.get('/chat-connections', (c) => {
     data: {
       slack: slackConnectionManager.getConnectionStatuses(),
       discord: discordConnectionManager.getConnectionStatuses(),
+      qqOfficial: qqOfficialConnectionManager.getConnectionStatuses(),
     },
     meta: { scope: 'current_api_process' },
   })
 })
 
 app.get('/:id/git-trigger/status', (c) => handleGitTriggerStatus(c, requireAgentWrite))
+
+app.post('/:id/qq-official/registration', (c) => handleQQOfficialRegistration(c, requireAgentWrite))
 
 /** GET /agents/:id/diagnose — Agent 综合诊断（执行引擎/Provider + 飞书与长连接等；WS 状态仅当前实例） */
 app.get('/:id/diagnose', async (c) => {
@@ -1369,6 +1389,16 @@ app.patch('/:id', async (c) => {
       ),
     }
   }
+  let qqOfficialConfigToSave = parsed.data.qqOfficialConfig
+  if (qqOfficialConfigToSave) {
+    qqOfficialConfigToSave = {
+      ...qqOfficialConfigToSave,
+      appSecret: resolveMaskedChannelSecret(
+        qqOfficialConfigToSave.appSecret,
+        existing.qqOfficialConfig?.appSecret,
+      ),
+    }
+  }
 
   const a2aRouteTargetsToSave = preserveA2ARouteTargetSecrets(
     parsed.data.a2aRouteTargets,
@@ -1444,6 +1474,7 @@ app.patch('/:id', async (c) => {
     feishuConfig: feishuConfigToSave,
     slackConfig: slackConfigToSave,
     discordConfig: discordConfigToSave,
+    qqOfficialConfig: qqOfficialConfigToSave,
     a2aRouteTargets: a2aRouteTargetsToSave.value,
     ...providerCredentialFields,
     memoryProviderApiKey: memoryProviderApiKeyToSave,
@@ -1469,9 +1500,11 @@ app.patch('/:id', async (c) => {
   // Resolve before persistence so workspace lookup failures still reject the
   // update, but defer file mutations until the database update succeeds. This
   // keeps both provider-preflight and database-failure paths side-effect free.
-  let disableWorkDir: string | undefined
+  let disableWorkDirs: string[] | undefined
   if (shouldRemoveMemoryOverrides) {
-    disableWorkDir = await resolveWorkDir(existing)
+    // Side-effect-free resolution: a config PATCH must never create a worktree
+    // or move a HEAD under a possibly-running run's feet.
+    disableWorkDirs = await resolveCleanupWorkDirs(existing)
   }
 
   const updated = (
@@ -1480,18 +1513,20 @@ app.patch('/:id', async (c) => {
 
   resyncGitTriggerAfterUpdate(id, parsed.data, updated)
 
-  if (disableWorkDir !== undefined) {
-    for (const file of ['CLAUDE.md', 'AGENTS.md', '.cursorrules']) {
-      try {
-        removeMemoryOverride(join(disableWorkDir, file))
-      } catch (err) {
-        // The committed DB row is authoritative. Do not roll it back after earlier
-        // files may already be clean; execution engines retry the relevant legacy
-        // override cleanup before spawning their CLI, so a later Run can self-heal.
-        logger.warn(
-          { agentId: existing.id, file, err },
-          `Failed to remove memory override from ${file}`,
-        )
+  if (disableWorkDirs !== undefined) {
+    for (const dir of disableWorkDirs) {
+      for (const file of ['CLAUDE.md', 'AGENTS.md', '.cursorrules']) {
+        try {
+          removeMemoryOverride(join(dir, file))
+        } catch (err) {
+          // The committed DB row is authoritative. Do not roll it back after earlier
+          // files may already be clean; execution engines retry the relevant legacy
+          // override cleanup before spawning their CLI, so a later Run can self-heal.
+          logger.warn(
+            { agentId: existing.id, file, err },
+            `Failed to remove memory override from ${file}`,
+          )
+        }
       }
     }
   }
@@ -1548,6 +1583,7 @@ const publishBodySchema = z.object({
   feishuConfig: feishuConfigBodySchema.nullable().optional(),
   slackConfig: slackConfigSchema.nullable().optional(),
   discordConfig: discordConfigSchema.nullable().optional(),
+  qqOfficialConfig: qqOfficialConfigSchema.nullable().optional(),
   chatAppConfig: chatAppConfigSchema.nullable().optional(),
   scheduleConfig: scheduleConfigSchema.nullable().optional(),
   glabConfig: glabTriggerConfigSchema.nullable().optional(),
@@ -1587,6 +1623,7 @@ app.post('/:id/publish', async (c) => {
     feishuConfig,
     slackConfig,
     discordConfig,
+    qqOfficialConfig,
     chatAppConfig,
     scheduleConfig,
     glabConfig,
@@ -1726,6 +1763,14 @@ app.post('/:id/publish', async (c) => {
     }
     updatePayload.discordConfig = resolvedDiscordConfig
   }
+  const preparedQQOfficialConfig = prepareQQOfficialPublishConfig(
+    channels,
+    qqOfficialConfig,
+    agent.qqOfficialConfig,
+    qqOfficialConfig !== undefined,
+  )
+  if (qqOfficialConfig !== undefined)
+    updatePayload.qqOfficialConfig = preparedQQOfficialConfig.update
 
   // Chat app config is presentation copy only — no credentials, so no '********'
   // preservation dance and nothing to mask on the read path.
@@ -1761,6 +1806,15 @@ app.post('/:id/publish', async (c) => {
       {
         error: 'Discord channel requires applicationId and botToken.',
         code: 'DISCORD_CONFIG_REQUIRED',
+      },
+      400,
+    )
+  }
+  if (preparedQQOfficialConfig.missingRequired) {
+    return c.json(
+      {
+        error: 'QQ Official channel requires appId and appSecret.',
+        code: 'QQ_OFFICIAL_CONFIG_REQUIRED',
       },
       400,
     )
@@ -1831,6 +1885,7 @@ app.post('/:id/publish', async (c) => {
   } else if (!channels.includes('discord')) {
     void discordConnectionManager.stop(id)
   }
+  syncQQOfficialConnectionAfterPublish(id, isStopped, channels, preparedQQOfficialConfig.effective)
 
   // Start/stop schedule trigger based on channels
   if (!isStopped && channels.includes('schedule')) {
@@ -1860,6 +1915,7 @@ const channelConfigSchemas = {
   feishu: feishuConfigBodySchema,
   slack: slackConfigSchema,
   discord: discordConfigSchema,
+  qq_official: qqOfficialConfigSchema,
   chat_app: chatAppConfigSchema,
   schedule: scheduleConfigSchema,
   // Provider-bound, so a mismatched config is a 400 from schema validation
@@ -1875,6 +1931,7 @@ const CHANNEL_CONFIG_COLUMN: Record<ConfigurableChannel, string> = {
   feishu: 'feishuConfig',
   slack: 'slackConfig',
   discord: 'discordConfig',
+  qq_official: 'qqOfficialConfig',
   chat_app: 'chatAppConfig',
   schedule: 'scheduleConfig',
   glab: 'glabConfig',
@@ -1958,6 +2015,11 @@ app.patch('/:id/channels/:channel', async (c) => {
     const botToken = restoreSecret(next.botToken, agent.discordConfig?.botToken)
     if (!botToken.ok) return maskedWithoutStored('botToken')
     config = { ...next, botToken: botToken.value }
+  } else if (channel === 'qq_official') {
+    const next = config as { appSecret?: string }
+    const appSecret = restoreSecret(next.appSecret, agent.qqOfficialConfig?.appSecret)
+    if (!appSecret.ok) return maskedWithoutStored('appSecret')
+    config = { ...next, appSecret: appSecret.value }
   }
 
   // 只有「已发布 + 该渠道已启用」才让改动即时生效；draft 或未启用时仅落库。
@@ -1991,7 +2053,12 @@ app.patch('/:id/channels/:channel', async (c) => {
                 applicationId: (config as { applicationId?: string }).applicationId,
                 botToken: (config as { botToken?: string }).botToken,
               }
-            : {}
+            : channel === 'qq_official'
+              ? {
+                  appId: (config as { appId?: string }).appId,
+                  appSecret: (config as { appSecret?: string }).appSecret,
+                }
+              : {}
     const blank = Object.entries(required).find(([, value]) => !value?.trim())
     if (blank) {
       return c.json(
@@ -2030,6 +2097,15 @@ app.patch('/:id/channels/:channel', async (c) => {
         .catch((err) =>
           logger.error({ err, agentId: id }, 'Failed to restart Discord connection on config save'),
         )
+    } else if (channel === 'qq_official') {
+      qqOfficialConnectionManager
+        .start(id, config as Parameters<typeof qqOfficialConnectionManager.start>[1])
+        .catch((err) =>
+          logger.error(
+            { err, agentId: id },
+            'Failed to restart QQ Official connection on config save',
+          ),
+        )
     } else if (channel === 'schedule') {
       scheduleTriggerManager.start(id, config as ScheduleConfigInput)
     } else if (channel === 'glab' || channel === 'gh') {
@@ -2064,6 +2140,7 @@ app.post('/:id/stop', async (c) => {
   feishuConnectionManager.stop(id)
   void slackConnectionManager.stop(id)
   void discordConnectionManager.stop(id)
+  void qqOfficialConnectionManager.stop(id)
   scheduleTriggerManager.stop(id)
   gitTriggerManager.stopAgent(id)
   logAudit(c, { action: 'agent.stop', resource: 'agent', resourceId: id })
@@ -2119,6 +2196,7 @@ app.post('/:id/resume', async (c) => {
       logger.error({ err, agentId: id }, 'Failed to start Discord connection on resume')
     }
   }
+  await resumeQQOfficialConnection(id, resumedChannels, updated?.qqOfficialConfig)
 
   // Restart schedule trigger on resume
   if (resumedChannels.includes('schedule') && updated?.scheduleConfig) {
@@ -2211,6 +2289,7 @@ app.post('/:id/clone', async (c) => {
         feishuConfig: null,
         slackConfig: null,
         discordConfig: null,
+        qqOfficialConfig: null,
         scheduleConfig: null,
         glabConfig: null,
         ghConfig: null,
@@ -2400,6 +2479,17 @@ app.post('/:id/chat', async (c) => {
     if (source && source.initialSyncCompletedAt == null) {
       return c.json({ error: SCM_INITIAL_SYNC_REQUIRED_MSG }, 400)
     }
+  }
+
+  // Reserved namespace, rejected only for NEW requests: an explicit worktree
+  // addressing a per-agent workspace would downgrade its persistent state and
+  // hand its long-lived branch to run-end removal. Sticky configs persisted
+  // before this rule keep replaying (grandfathered in resolveWorkDir).
+  if (parsed.data.worktree?.name.startsWith('agent-')) {
+    return c.json(
+      { error: "Worktree names with the 'agent-' prefix are reserved for per-agent workspaces" },
+      400,
+    )
   }
 
   // Worktree 参数：在入库 run 记录时一并写入，保证排队场景调度器能读到
@@ -2631,24 +2721,33 @@ app.post('/:id/chat', async (c) => {
   // 在同步事务内完成占用检查 + workDir 原子写回，防止并发竞态。
   let resolvedWorkDir: string
   try {
-    resolvedWorkDir = await resolveWorkDir(agent, parsed.data.worktree, runId)
+    resolvedWorkDir = await resolveWorkDir(
+      agent,
+      parsed.data.worktree,
+      runId,
+      (await agentConfig).agentEnv,
+    )
   } catch (err) {
+    // 释放已占用的 slot。新建的 run 直接删除；复用的 run 还原 intent/executionMetadata/status
+    // 到覆盖前的原值（不留 pending）——留 pending 会被 409 guard 永久挡死且 scheduleNext 不恢复
+    // pending（review [P1]）；不还原 intent 则历史被污染成一条从未执行的新消息（review [P2]）。
+    // Awaited: the restore must land before scheduleNext runs, which is the
+    // ordering the comment above depends on.
+    //
+    // Unconditional: any failure leaves a run the queue counts as running, so
+    // an untyped error (a workspace bookkeeping failure, a broken SCM config)
+    // would otherwise pin the Agent at maxConcurrency until someone edits the
+    // database.
+    await abandonRun()
+    completeExecutionLease(runId)
+    scheduleNext(taskQueueDb, id, (rid, aid) => void executeChatRun(aid, rid))
     if (
       err instanceof WorktreeOccupiedError ||
       err instanceof WorktreeBranchLockedError ||
       err instanceof WorktreeDirtyError
     ) {
-      // 释放已占用的 slot。新建的 run 直接删除；复用的 run 还原 intent/executionMetadata/status
-      // 到覆盖前的原值（不留 pending）——留 pending 会被 409 guard 永久挡死且 scheduleNext 不恢复
-      // pending（review [P1]）；不还原 intent 则历史被污染成一条从未执行的新消息（review [P2]）。
-      // Awaited: the restore must land before scheduleNext runs, which is the
-      // ordering the comment above depends on.
-      await abandonRun()
-      completeExecutionLease(runId)
-      scheduleNext(taskQueueDb, id, (rid, aid) => void executeChatRun(aid, rid))
       return c.json({ error: err.message }, 409)
     }
-    completeExecutionLease(runId)
     throw err
   }
 
@@ -2904,12 +3003,20 @@ app.delete('/:id', async (c) => {
   feishuConnectionManager.stop(id)
   void slackConnectionManager.stop(id)
   void discordConnectionManager.stop(id)
+  void qqOfficialConnectionManager.stop(id)
   scheduleTriggerManager.stop(id)
   gitTriggerManager.stopAgent(id)
   revokeAgentTokensForAgent(id)
 
   removeAgentMemory(id)
   clearAgentIndex(id)
+
+  // Reclaim the per-agent worktree in the background: serial `git worktree
+  // remove --force` on a large or multi-repo checkout is seconds of latency,
+  // and nothing downstream reads its outcome (failures only log).
+  void removePerAgentWorkspace(agent).catch((err) =>
+    logger.warn({ err, agentId: id }, 'Per-agent worktree reclaim failed'),
+  )
 
   const deleted = (await db.delete(agents).where(eq(agents.id, id)).returning())[0]
 

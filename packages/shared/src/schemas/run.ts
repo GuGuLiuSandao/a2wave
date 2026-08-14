@@ -16,6 +16,7 @@ export const runTriggerSourceEnum = z.enum([
   'feishu',
   'slack',
   'discord',
+  'qq_official',
   'a2a',
   'schedule',
   'oauth',

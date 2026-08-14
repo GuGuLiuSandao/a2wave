@@ -16,7 +16,7 @@
 - **Run** — 一次 Agent 执行记录，状态 pending/queued/running/completed/failed/cancelled。见 [运行记录](/wiki/runs)。
 - **Run Step** — 一次 Run 内的执行步骤（多步任务）。见 [运行记录](/wiki/runs)。
 - **产物（Artifacts）** — Run 中生成、可下载或在线分享的文件（网页 / Markdown / 目录）。见 [产物与在线分享](/wiki/artifacts)。
-- **触发渠道（triggerSource）** — Run 的来源：debug / api / feishu / slack / discord / a2a / schedule / oauth / chat_app。见 [触发方式](/wiki/triggers)。
+- **触发渠道（triggerSource）** — Run 的来源：debug / api / feishu / slack / discord / qq_official / a2a / schedule / oauth / chat_app。见 [触发方式](/wiki/triggers)。
 - **Gateway（网关）** — 对外调用已发布 Agent 的 API 入口（`/api/gateway/...`）。见 [触发方式](/wiki/triggers)。
 - **A2A** — Agent-to-Agent 协议，供外部 Agent 发现并调用本平台 Agent（JSON-RPC）。见 [触发方式](/wiki/triggers)。
 - **系统提示词（System Prompt）** — Agent 的核心人设与规则，支持 Mustache 变量。见 [Agent 管理](/wiki/agents)。
@@ -25,7 +25,7 @@
 - **评测任务** — 用 Agent 当前配置跑一遍评测集，并冻结 provider/模型/提示词快照。见 [评测](/wiki/evaluation)。
 - **配置快照** — 评测任务留存的配置记录（provider + 模型 + 提示词，不含密钥），用于横向对比。见 [评测](/wiki/evaluation)。
 - **成员角色** — owner / editor / viewer 三级权限。见 [成员管理](/wiki/members)。
-- **铁律** — 定义产品边界的 5 条硬约束。见 [核心理念与架构](/wiki/concepts)。
+- **铁律** — 定义产品边界的 6 条硬约束。见 [核心理念与架构](/wiki/concepts)。
 
 ## 相关
 

@@ -34,6 +34,7 @@ const CONNECTION_QUERY_KEYS = [FEISHU_CONNECTIONS_QUERY_KEY, CHAT_CONNECTIONS_QU
 export type ChatConnectionsResponse = {
   slack: FeishuConnectionRow[]
   discord: FeishuConnectionRow[]
+  qqOfficial: FeishuConnectionRow[]
 }
 
 function toSocketMap(rows: FeishuConnectionRow[] | undefined): Map<string, boolean> {
@@ -61,6 +62,7 @@ export function useChatConnections(options?: { enabled?: boolean }) {
     select: (res) => ({
       slack: toSocketMap(res.data?.slack),
       discord: toSocketMap(res.data?.discord),
+      qq_official: toSocketMap(res.data?.qqOfficial),
       meta: res.meta,
     }),
   })
@@ -92,6 +94,7 @@ export function useNativeChatConnections(options?: { enabled?: boolean }): {
     feishu: feishu.isError,
     slack: chat.isError,
     discord: chat.isError,
+    qq_official: chat.isError,
   }
   // A query still in flight has no data yet; a failed one never will. Both are
   // represented by an empty map plus the per-channel error flag, so a partial
@@ -100,6 +103,7 @@ export function useNativeChatConnections(options?: { enabled?: boolean }): {
     feishu: feishu.data?.byId ?? new Map(),
     slack: chat.data?.slack ?? new Map(),
     discord: chat.data?.discord ?? new Map(),
+    qq_official: chat.data?.qq_official ?? new Map(),
   }
   return {
     connections,
@@ -278,6 +282,21 @@ export type DiscordPublishConfig = {
   sendArtifactsAsFile: boolean
 }
 
+export type QQOfficialPublishConfig = {
+  appId: string
+  appSecret: string
+  enableGroupAndC2c: boolean
+  enableGuildMessages: boolean
+  enableGuildDirectMessages: boolean
+  groupTriggerOnAt: boolean
+  groupTriggerOnNewMessage: boolean
+  groupReplyMode: 'reply' | 'new' | 'none'
+  c2cReplyMode: 'reply' | 'new' | 'none'
+  guildReplyMode: 'reply' | 'new' | 'none'
+  guildDmReplyMode: 'reply' | 'new' | 'none'
+  sendArtifactsAsFile: boolean
+}
+
 /** Chat app page presentation config — copy only, never credentials. */
 export type ChatAppPublishConfig = {
   displayName?: string
@@ -309,6 +328,7 @@ export type PublishConfig = {
   feishuConfig?: FeishuPublishConfig | null
   slackConfig?: SlackPublishConfig | null
   discordConfig?: DiscordPublishConfig | null
+  qqOfficialConfig?: QQOfficialPublishConfig | null
   chatAppConfig?: ChatAppPublishConfig | null
   scheduleConfig?: SchedulePublishConfig | SchedulePublishConfig[] | null
   /** GitLab 仓库轮询触发配置（glab CLI） */
@@ -341,6 +361,9 @@ export function usePublishAgent() {
         ...(config.feishuConfig !== undefined && { feishuConfig: config.feishuConfig }),
         ...(config.slackConfig !== undefined && { slackConfig: config.slackConfig }),
         ...(config.discordConfig !== undefined && { discordConfig: config.discordConfig }),
+        ...(config.qqOfficialConfig !== undefined && {
+          qqOfficialConfig: config.qqOfficialConfig,
+        }),
         ...(config.chatAppConfig !== undefined && { chatAppConfig: config.chatAppConfig }),
         ...(config.scheduleConfig !== undefined && { scheduleConfig: config.scheduleConfig }),
         ...(config.glabConfig !== undefined && { glabConfig: config.glabConfig }),
@@ -353,9 +376,11 @@ export function usePublishAgent() {
           scheduleRunAsOwner: config.scheduleRunAsOwner,
         }),
       }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: AGENTS_KEY })
-      for (const key of CONNECTION_QUERY_KEYS) qc.invalidateQueries({ queryKey: key })
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: AGENTS_KEY }),
+        ...CONNECTION_QUERY_KEYS.map((key) => qc.invalidateQueries({ queryKey: key })),
+      ])
     },
   })
 }
@@ -365,6 +390,7 @@ export type ConfigurableChannel =
   | 'feishu'
   | 'slack'
   | 'discord'
+  | 'qq_official'
   | 'chat_app'
   | 'schedule'
   | 'glab'
@@ -379,6 +405,7 @@ export type SaveChannelConfigVars =
   | { id: string; channel: 'feishu'; config: FeishuPublishConfig }
   | { id: string; channel: 'slack'; config: SlackPublishConfig }
   | { id: string; channel: 'discord'; config: DiscordPublishConfig }
+  | { id: string; channel: 'qq_official'; config: QQOfficialPublishConfig }
   | { id: string; channel: 'chat_app'; config: ChatAppPublishConfig }
   | { id: string; channel: 'schedule'; config: SchedulePublishConfig | SchedulePublishConfig[] }
   | { id: string; channel: 'glab'; config: GitTriggerConfig }
@@ -458,6 +485,39 @@ export function useRegenerateA2aApiKey() {
   })
 }
 
+export type QQOfficialRegistrationTask = {
+  taskId: string
+  bindKey: string
+  qrCodeUrl: string
+  intervalMs: number
+}
+
+export type QQOfficialRegistrationResult =
+  | { status: 'pending' }
+  | { status: 'expired' }
+  | { status: 'completed'; appId: string; appSecret: string }
+
+export function useQQOfficialRegistration() {
+  return useMutation({
+    mutationFn: async (
+      input:
+        | { agentId: string; action: 'start' }
+        | { agentId: string; action: 'poll'; taskId: string; bindKey: string },
+    ) => {
+      if (input.action === 'start') {
+        return api.post<QQOfficialRegistrationTask>(
+          `/agents/${input.agentId}/qq-official/registration`,
+          { action: 'start' },
+        )
+      }
+      return api.post<QQOfficialRegistrationResult>(
+        `/agents/${input.agentId}/qq-official/registration`,
+        { action: 'poll', taskId: input.taskId, bindKey: input.bindKey },
+      )
+    },
+  })
+}
+
 export function useChatAgent() {
   return useMutation({
     mutationFn: ({ id, message }: { id: string; message: string }) =>
@@ -473,6 +533,13 @@ export type StreamLogEntry =
       model?: string
       providerName?: string
       nextProviderName?: string
+      metadata?: {
+        target?: string
+        taskId?: string
+        contextId?: string
+        state?: string
+        attempt?: number
+      }
       /** log_file_size_capped / log_file_entries_dropped 标记携带的丢弃条数 */
       dropped?: number
       ts: number

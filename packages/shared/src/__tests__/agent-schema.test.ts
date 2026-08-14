@@ -8,6 +8,7 @@ import {
   discordConfigSchema,
   feishuConfigSchema,
   publishChannelEnum,
+  qqOfficialConfigSchema,
   scheduleConfigSchema,
   slackConfigSchema,
   updateAgentInput,
@@ -320,9 +321,10 @@ describe('schedule config schema compatibility', () => {
 })
 
 describe('native chat channel schemas', () => {
-  it('accepts Slack and Discord as publish channels', () => {
+  it('accepts native chat publish channels', () => {
     expect(publishChannelEnum.parse('slack')).toBe('slack')
     expect(publishChannelEnum.parse('discord')).toBe('discord')
+    expect(publishChannelEnum.parse('qq_official')).toBe('qq_official')
   })
 
   it('applies safe Slack trigger defaults', () => {
@@ -354,6 +356,23 @@ describe('native chat channel schemas', () => {
       dmReplyMode: 'reply',
       sendArtifactsAsFile: true,
     })
+  })
+
+  it('applies safe QQ Official WebSocket defaults', () => {
+    expect(qqOfficialConfigSchema.parse({ appId: '102000000', appSecret: 'secret' })).toMatchObject(
+      {
+        enableGroupAndC2c: true,
+        enableGuildMessages: true,
+        enableGuildDirectMessages: true,
+        groupTriggerOnAt: true,
+        groupTriggerOnNewMessage: false,
+        groupReplyMode: 'reply',
+        c2cReplyMode: 'reply',
+        guildReplyMode: 'reply',
+        guildDmReplyMode: 'reply',
+        sendArtifactsAsFile: true,
+      },
+    )
   })
 })
 

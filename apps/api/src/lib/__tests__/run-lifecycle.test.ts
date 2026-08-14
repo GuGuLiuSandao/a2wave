@@ -271,11 +271,17 @@ vi.mock('../execute-chat-run.js', () => ({
 
 const mockSendSlackResultByContext = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const mockSendDiscordResultByContext = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const mockSendQQOfficialResultByContext = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 vi.mock('../slack-service.js', () => ({
   slackConnectionManager: { sendRunResultByContext: mockSendSlackResultByContext },
 }))
 vi.mock('../discord-service.js', () => ({
   discordConnectionManager: { sendRunResultByContext: mockSendDiscordResultByContext },
+}))
+vi.mock('../qq-official-service.js', () => ({
+  qqOfficialConnectionManager: {
+    sendRunResultByContext: mockSendQQOfficialResultByContext,
+  },
 }))
 
 vi.mock('../artifact-storage.js', () => ({
@@ -437,6 +443,37 @@ describe('finishRunSuccess', () => {
     expect(agentChatContent()).toContain(`run_id=${runId}`)
     await vi.waitFor(() => {
       expect(mockSendDiscordResultByContext).toHaveBeenCalledWith(
+        agentId,
+        channel,
+        expect.stringContaining(`run_id=${runId}`),
+        [],
+      )
+    })
+  })
+
+  it('persists and delivers an empty QQ Official result as a non-sensitive fallback', async () => {
+    const channel = {
+      channel_type: 'qq_official',
+      channel_info: {
+        app_id: '102000000',
+        scene: 'c2c',
+        message_id: 'M123',
+        sender_open_id: 'U123',
+      },
+      user_info: null,
+    }
+    mockDbGet.mockReturnValueOnce({ input: { context: { channel } } })
+
+    await finishRunSuccess(baseParams, {
+      success: true,
+      output: '',
+      chatId: undefined,
+      durationMs: 0,
+    })
+
+    expect(agentChatContent()).toContain(`run_id=${runId}`)
+    await vi.waitFor(() => {
+      expect(mockSendQQOfficialResultByContext).toHaveBeenCalledWith(
         agentId,
         channel,
         expect.stringContaining(`run_id=${runId}`),
@@ -1012,6 +1049,36 @@ describe('finishRunError', () => {
     )
   })
 
+  it('notifies QQ Official with a safe fallback when execution fails', async () => {
+    const channel = {
+      channel_type: 'qq_official',
+      channel_info: {
+        app_id: '102000000',
+        scene: 'c2c',
+        message_id: 'M123',
+        sender_open_id: 'U123',
+      },
+      user_info: null,
+    }
+    mockDbGet
+      .mockReturnValueOnce({ input: { context: { channel } } })
+      .mockReturnValueOnce({ name: 'Test Agent' })
+
+    await finishRunError(baseParams, new Error('secret provider failure'))
+
+    await vi.waitFor(() => {
+      expect(mockSendQQOfficialResultByContext).toHaveBeenCalledWith(
+        agentId,
+        channel,
+        expect.stringContaining(`run_id=${runId}`),
+        [],
+      )
+    })
+    expect(mockSendQQOfficialResultByContext.mock.calls[0]?.[2]).not.toContain(
+      'secret provider failure',
+    )
+  })
+
   // ── L1: double-finalize guard ──
   // mockReturnValueOnce (not mockReturnValue) so the status only affects the
   // guard's single SELECT and does not leak into later tests' default get.
@@ -1250,6 +1317,37 @@ describe('cleanupWorktreeIfEphemeral', () => {
 
     await cleanupWorktreeIfEphemeral('run_1', 'agt_1')
     expect(removeWorkspace).toHaveBeenCalledWith('fix')
+  })
+
+  it('never removes the per-agent worktree, even with a legacy ephemeral config', async () => {
+    // A worktreeConfig persisted before the reserved-prefix rule can name the
+    // Agent's own long-lived workspace with cleanup: 'ephemeral'. Run-end
+    // cleanup must skip it entirely — keeping the branch is not enough, the
+    // directory holds uncommitted work.
+    mockDbGet.mockReturnValueOnce({
+      workDir: '/ws/agent-abc123def456ghi7',
+      worktreeConfig: { name: 'agent-abc123def456ghi7', cleanup: 'ephemeral' },
+    })
+    const removeWorkspace = vi.fn().mockResolvedValue(undefined)
+    mockCreateScmSource.mockReturnValue({ removeWorkspace, wsRoot: '/ws' })
+
+    await cleanupWorktreeIfEphemeral('run_1', 'agt_abc123def456ghi7')
+    expect(removeWorkspace).not.toHaveBeenCalled()
+  })
+
+  it("never removes another agent's per-agent worktree either", async () => {
+    // The guard is on the workspace shape, not on "is it mine": a config
+    // pointing at a different Agent's worktree would otherwise delete that
+    // Agent's directory and `git branch -D` its unmerged commits.
+    mockDbGet.mockReturnValueOnce({
+      workDir: '/ws/agent-zzz999yyy888xxx7',
+      worktreeConfig: { name: 'agent-zzz999yyy888xxx7', cleanup: 'ephemeral' },
+    })
+    const removeWorkspace = vi.fn().mockResolvedValue(undefined)
+    mockCreateScmSource.mockReturnValue({ removeWorkspace, wsRoot: '/ws' })
+
+    await cleanupWorktreeIfEphemeral('run_1', 'agt_abc123def456ghi7')
+    expect(removeWorkspace).not.toHaveBeenCalled()
   })
 
   it('skips removeWorkspace when resolved path differs from run.workDir (scmSourceId rebind)', async () => {

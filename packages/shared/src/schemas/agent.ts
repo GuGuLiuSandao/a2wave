@@ -42,6 +42,7 @@ export const publishChannelEnum = z.enum([
   'feishu',
   'slack',
   'discord',
+  'qq_official',
   'schedule',
   'oauth',
   'chat_app',
@@ -218,6 +219,23 @@ export const discordConfigSchema = z.object({
 })
 export type DiscordConfig = z.input<typeof discordConfigSchema>
 
+/** QQ Official Bot configuration using Tencent's public WebSocket Gateway. */
+export const qqOfficialConfigSchema = z.object({
+  appId: z.string().trim().min(1),
+  appSecret: z.string().min(1),
+  enableGroupAndC2c: z.boolean().default(true),
+  enableGuildMessages: z.boolean().default(true),
+  enableGuildDirectMessages: z.boolean().default(true),
+  groupTriggerOnAt: z.boolean().default(true),
+  groupTriggerOnNewMessage: z.boolean().default(false),
+  groupReplyMode: z.enum(['reply', 'new', 'none']).default('reply'),
+  c2cReplyMode: z.enum(['reply', 'new', 'none']).default('reply'),
+  guildReplyMode: z.enum(['reply', 'new', 'none']).default('reply'),
+  guildDmReplyMode: z.enum(['reply', 'new', 'none']).default('reply'),
+  sendArtifactsAsFile: z.boolean().default(true),
+})
+export type QQOfficialConfig = z.input<typeof qqOfficialConfigSchema>
+
 /** Max number of starter questions offered on the chat app landing screen. */
 export const CHAT_APP_SUGGESTED_QUESTIONS_MAX = 6
 
@@ -375,6 +393,7 @@ export const agentSchema = z.object({
   feishuConfig: feishuConfigSchema.nullable().optional(),
   slackConfig: slackConfigSchema.nullable().optional(),
   discordConfig: discordConfigSchema.nullable().optional(),
+  qqOfficialConfig: qqOfficialConfigSchema.nullable().optional(),
   chatAppConfig: chatAppConfigSchema.nullable().optional(),
   scheduleConfig: scheduleConfigSchema.nullable().optional(),
   /**
@@ -445,6 +464,7 @@ export const createAgentInput = z.object({
   feishuConfig: feishuConfigSchema.nullable().optional(),
   slackConfig: slackConfigSchema.nullable().optional(),
   discordConfig: discordConfigSchema.nullable().optional(),
+  qqOfficialConfig: qqOfficialConfigSchema.nullable().optional(),
   chatAppConfig: chatAppConfigSchema.nullable().optional(),
   scheduleConfig: scheduleConfigSchema.nullable().optional(),
   glabConfig: glabTriggerConfigSchema.nullable().optional(),

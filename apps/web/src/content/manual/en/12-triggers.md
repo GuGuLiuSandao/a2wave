@@ -1,6 +1,6 @@
 # Trigger Methods
 
-a2wave currently provides **eight publish channels**: REST API, OAuth, A2A protocol, Feishu, Slack, Discord, scheduled trigger, and chat page. A single Agent can enable multiple at once. Slack and Discord currently provide text messaging through the same direct-connection model as Feishu and will later converge on a shared chat-channel adapter.
+a2wave currently provides **eleven publish channels**: REST API, OAuth, A2A protocol, Feishu, Slack, Discord, QQ Official Bot, scheduled trigger, chat page, GitLab trigger, and GitHub trigger. A single Agent can enable multiple at once.
 
 ## Managing channels on the Publish tab
 
@@ -22,7 +22,7 @@ Once configured, click **Publish / Update** at the bottom of the page to put the
 
 ### Connection status for chat channels
 
-Feishu, Slack and Discord each hold their own **long connection** to the platform, so their cards show a live connection status labelled with the protocol each one speaks: **WebSocket** for Feishu, **Socket Mode** for Slack, and **Gateway** for Discord. With all three enabled at once, the protocol name is what tells you which connection to go and debug.
+Feishu, Slack, Discord, and QQ Official Bot each hold their own **long connection** to the platform, so their cards show a live status labelled with the protocol each one speaks: **WebSocket**, **Socket Mode**, **Gateway**, and **Official WebSocket**, respectively.
 
 | Status | Meaning |
 |--------|---------|
@@ -230,7 +230,25 @@ Discord Attachments are downloaded under the platform-wide attachment policy and
 
 ---
 
-## 5. Chat page
+## 5. QQ Official Bot
+
+This channel uses Tencent QQ's **official WebSocket Gateway only**. It does not use NapCat or OneBot and requires no public callback URL.
+
+Open the QQ Official Bot card on the Agent's Publish tab and prepare credentials in either way:
+
+1. **Create by QR code (recommended)**: click **Scan QR to create**, scan with mobile QQ, and confirm on Tencent's page. App ID and App Secret are filled into the form automatically. Save the config, switch the channel on, and publish.
+2. **Existing bot**: enter the App ID and App Secret of an existing bot from Tencent's QQ developer platform.
+
+The channel consumes five official events: QQ group @ messages, ordinary QQ group messages, QQ direct messages, QQ guild @ messages, and QQ guild direct messages. Groups trigger only on @mention by default. “Trigger on every new group message” is off by default to avoid unexpectedly creating a Run for every message in a busy group.
+
+Replies may reference the original message, send a new message, or be disabled. QQ passive-reply anchors expire quickly; when an Agent finishes after the anchor has expired, a2wave follows AstrBot's behavior and retries as a new message. QQ groups and direct messages can upload Agent artifacts through Tencent's media API. Guild channels currently receive a2wave download links for artifacts. Incoming official attachments are downloaded under the platform-wide file type, count, and size limits and then handed to the Agent.
+
+> [!WARNING]
+> Within one API process, a QQ App ID can be held by only one Agent's official Gateway connection. Use a different QQ Official Bot for each Agent. App Secrets remain visible to the Agent's trusted owner and editors so they can maintain the channel; QR binding keys and completed plaintext secrets are never written to audit details.
+
+---
+
+## 6. Chat page
 
 Publish an Agent as a shareable chat page: its profile, status and creator on the left, a full conversation window on the right. Good for handing an Agent straight to a colleague without teaching them the console first.
 
@@ -264,7 +282,7 @@ Every conversation is written to run history with the source marked `Chat Page`,
 
 ---
 
-## 6. A2A Protocol
+## 7. A2A Protocol
 
 A2A (Agent-to-Agent) lets external Agent systems discover and invoke this platform's Agents, and lets this platform's Agents route to standards-compliant remote A2A services. The platform supports **A2A 1.0 JSON-RPC** and remains compatible with **A2A 0.3 JSON-RPC**.
 
@@ -313,7 +331,15 @@ Open **A2A Route** on the Agent's Configuration tab and add a remote Agent:
 4. If the remote service requires a Bearer key, enter its API Key. After saving, the credential is shown only as a mask and is never included in the Agent Card or routing result.
 
 > [!NOTE]
-> **Direct endpoint** mode cannot discover whether the remote service supports streaming, so it deliberately uses blocking `SendMessage` for both A2A 1.0 and 0.3. Live remote child output is therefore unavailable in Direct mode. Use **Agent Card discovery** when you need streaming and the remote service advertises it.
+> **Direct endpoint** mode cannot discover remote capabilities. Direct A2A 1.0 therefore uses non-streaming `SendMessage` conservatively, while existing A2A 0.3 routes retain the `message/stream` compatibility path. Use **Agent Card discovery** when you need standard A2A 1.0 streaming and the peer advertises it.
+
+### Long tasks, timeouts, and cancellation
+
+A2A routing no longer adds a fixed five-minute execution deadline. The effective execution window inherits the **calling Agent's** single-execution limit under **Configuration → Timeout**. Increase that setting on the calling Agent (5–120 minutes) when a remote task legitimately needs more time; there is no separate route timeout to update. If **Total timeout** is configured, its whole-Run limit still covers retries and multiple Agent calls.
+
+For A2A 1.0, the platform obtains a Task ID as early as possible and then follows that Task's lifecycle. Non-streaming calls use `GetTask`. If a streaming connection with a known Task ID is idle for 30 seconds or disconnects unexpectedly, the router first uses `SubscribeToTask` and falls back to `GetTask`. Recovery uses only the existing Task ID and **never resends the original message**, preventing duplicate remote execution. Partial artifact chunks received before a disconnect remain part of the invocation and are combined with later append chunks after reconnection. Working-state messages remain progress only and are not returned as the successful final answer when a terminal Task has no response body. A temporarily unavailable terminal history read continues with the same `GetTask` backoff policy even after resubscription succeeded.
+
+When the parent Run is canceled or reaches its timeout, the router sends `CancelTask` through an independent short control request whenever a Task ID is known, and reports whether downstream cancellation was confirmed. The same best-effort cleanup is attempted when a known Task exceeds the router's result safety limits, or when both reconnect and polling fail permanently while the last observed Task is still running. This prevents a downstream task from continuing unseen after the caller has received a recovery error. Even when the underlying Agent CLI has begun exiting after a timeout, the platform gives the router a brief cleanup window and waits for the cancellation request before terminating the process. A2A lifecycle events appear directly in the Run detail's **Execution log** timeline, including the target Agent, Task ID, state, reconnect attempts, and cancellation result. They never contain the request body or credentials. A connection that fails before returning a Task ID cannot be safely reconnected or canceled, so the router reports the failure without guessing or replaying the message. A2A 0.3 routes remain protocol-compatible and inherit the parent's cancellation signal, but the full reconnect-and-cancel-by-ID guarantee applies only to A2A 1.0; use A2A 1.0 for long-running work.
 
 > [!NOTE]
 > If a standard remote Agent returns `INPUT_REQUIRED` or `AUTH_REQUIRED`, routing reports a non-success result containing the Agent's status message plus its `taskId` and `contextId`. The route tool does not resume that remote task automatically; provide the requested context in a new invocation, or update the remote credentials before retrying.
@@ -326,7 +352,7 @@ Open **A2A Route** on the Agent's Configuration tab and add a remote Agent:
 
 ---
 
-## 7. Scheduled trigger
+## 8. Scheduled trigger
 
 Have an Agent automatically create and execute Runs at specified times on a Cron schedule (e.g. daily code review, weekly reports, inspections). Open the Schedule Trigger card's **Configure** dialog on the Publish tab:
 
@@ -350,7 +376,7 @@ Notes: minute-level precision; each Agent can be configured with multiple schedu
 
 ## Attachments (images and files)
 
-When messaging an Agent you can include images and documents. Feishu, Slack, and Discord automatically recognize images/files in a message; API, OAuth, and the Agent test UI use a **two-step upload**, while A2A uses protocol-native parts.
+When messaging an Agent you can include images and documents. Feishu, Slack, Discord, and QQ Official Bot automatically recognize images/files in a message; API, OAuth, and the Agent test UI use a **two-step upload**, while A2A uses protocol-native parts.
 
 **Two-step upload (API / OAuth / test UI)**
 
