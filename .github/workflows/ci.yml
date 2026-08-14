@@ -85,6 +85,27 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm lint
       - run: node --test scripts/gates/__tests__/check-docker-context.test.mjs
+      # Architecture rules R1–R8 ran only in the pre-commit hook before, but a
+      # `--no-verify` push skips every hook and CLAUDE.md names CI as R6's
+      # backstop — so the repo-wide sweeps must actually run here.
+      - run: node scripts/gates/check-arch-rules.mjs --all
+      - run: node scripts/gates/check-forbidden-tokens.mjs --all
+      - run: node scripts/gates/check-file-lines.mjs --all
+      # Workflow expressions have no type checking — a 178k-star repo ships a
+      # concurrency group that evaluates to a constant and cancels across PRs.
+      # Pinned + checksum-verified, like the gitleaks install below.
+      - name: actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+          echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum --check --strict -
+          tar -xzf "$archive" actionlint
+          ./actionlint
 
   typecheck:
     runs-on: ubuntu-latest
@@ -132,6 +153,20 @@ jobs:
       # Exit code is the gate: 0 clean, 1 leaks found, 2 an error such as a malformed config.
       - name: Scan full history
         run: ./gitleaks detect --source . --config .gitleaks.toml --redact --no-banner
+
+  # Known-vulnerability floor for the dependency tree (the one check hermes,
+  # vllm and dify all carry that we lacked). `critical` only, deliberately:
+  # the tree currently holds a handful of high-severity advisories in dev
+  # tooling, and a gate that is born red gets `continue-on-error`d into
+  # decoration. Dependabot's PRs are the fix path for those; tighten the
+  # level to `high` once they land.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm audit --audit-level critical
 
   # ───────────────────────────────────────────────────────────────────────
   # Lane-gated jobs: skipped when the diff cannot affect them.
@@ -306,6 +341,7 @@ jobs:
       - lint
       - typecheck
       - secret-scan
+      - audit
       - license-inventory
       - test-web
       - test-cli
