@@ -22,10 +22,10 @@ describe('merge-latency percentile', () => {
 
 describe('merge-latency summarize', () => {
   it('splits humans from bots — bot latency measures attention, not the pipeline', () => {
-    const rows = summarize([pr(1), pr(3), pr(48, 'dependabot[bot]')])
+    const rows = summarize([pr(1), pr(3), pr(5), pr(48, 'dependabot[bot]')])
     const by = Object.fromEntries(rows.map((r) => [r.group, r]))
-    assert.equal(by.all.n, 3)
-    assert.equal(by.humans.n, 2)
+    assert.equal(by.all.n, 4)
+    assert.equal(by.humans.n, 3)
     assert.equal(by.humans.median, 3)
     assert.equal(by.bots.n, 1)
     assert.equal(by.bots.median, 48)
