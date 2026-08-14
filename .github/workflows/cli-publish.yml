@@ -77,6 +77,13 @@ jobs:
 
       - run: pnpm install --frozen-lockfile --filter "a2wave..." --ignore-scripts
 
+      # The CLI resolves @a2wave/shared through its gitignored build output, and
+      # --ignore-scripts above means no prepare hook produces it. Typecheck and the
+      # generated-schemas test both read that dist/, so skipping this fails the job on a
+      # missing module rather than on anything about the release.
+      - name: Build shared
+        run: pnpm --filter @a2wave/shared build
+
       - name: Typecheck
         run: pnpm --filter a2wave typecheck
 
