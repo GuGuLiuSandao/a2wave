@@ -6,8 +6,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -316,8 +316,20 @@ test('Dockerfile retries the pinned Perforce download on transient network failu
 
   assert.match(
     dockerfile,
-    /curl -fsSL --retry 5 --retry-all-errors --retry-delay 2\s+\\\s+"https:\/\/cdist2\.perforce\.com\/perforce\/r24\.2/,
+    /curl -fsSL --retry 5 --retry-all-errors --retry-delay 2\s+\\\s+"https:\/\/filehost\.perforce\.com\/perforce\/r24\.2/,
   )
+})
+
+test('Dockerfile fetches p4 from the host the pinned checksums track', () => {
+  const dockerfile = readFileSync(resolve(root, 'Dockerfile'), 'utf8')
+
+  // Not a style preference: `cdist2` and `filehost` can serve different builds
+  // of the same r24.2 path. On 2026-08-14 `cdist2` was still serving x86_64
+  // changelist 2877946 while the published SHA256SUMS (and both arches on
+  // `filehost`) had moved to 3030719, so the pinned hash failed to verify a
+  // binary that was merely stale. Reverting the host silently reintroduces
+  // that build break.
+  assert.doesNotMatch(dockerfile, /cdist2\.perforce\.com\/perforce\/[^\n]*\/p4"/)
 })
 
 test('Dockerfile points the service at the flattened installer directory', () => {
