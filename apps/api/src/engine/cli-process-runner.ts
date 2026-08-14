@@ -1,10 +1,16 @@
-import { type ChildProcess, spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { performance } from 'node:perf_hooks'
 import { StringDecoder } from 'node:string_decoder'
 import { logger } from '../lib/logger.js'
+import { type CliSpawnOptions, spawnCli } from './cli-spawn.js'
 import { getExecutionAbortSignal } from './execution-lease-registry.js'
 import { emitExecutionProcessLogLine } from './execution-process-log.js'
+import {
+  type KillWindowsProcessTree,
+  killWindowsProcessTree,
+  terminateCliProcess,
+} from './windows-process-tree.js'
 
 const DEFAULT_STDERR_LIMIT_BYTES = 64 * 1024
 const FORCE_KILL_DELAY_MS = 5_000
@@ -34,11 +40,7 @@ export interface CliProcessRunOptions {
   cleanup?: () => void
 }
 
-type SpawnProcess = (
-  command: string,
-  args: string[],
-  options: Parameters<typeof spawn>[2],
-) => ChildProcess
+type SpawnProcess = (command: string, args: string[], options: CliSpawnOptions) => ChildProcess
 
 type SignalProcess = (pid: number, signal: NodeJS.Signals | 0) => boolean
 
@@ -49,6 +51,7 @@ export interface CliProcessRunnerOptions {
   ensureWorkDir?: (cwd: string) => void
   platform?: NodeJS.Platform
   signalProcess?: SignalProcess
+  killWindowsProcessTree?: KillWindowsProcessTree
 }
 
 interface ActiveProcess {
@@ -61,6 +64,7 @@ interface ActiveProcess {
   abortSignal?: AbortSignal
   abortListener?: () => void
   pendingCloseResult?: CliProcessRunResult
+  terminationAttempt?: Promise<void>
   finalize?: (result: CliProcessRunResult) => void
 }
 
@@ -149,14 +153,21 @@ export class CliProcessRunner {
   private readonly ensureWorkDir: (cwd: string) => void
   private readonly useProcessGroups: boolean
   private readonly signalProcess: SignalProcess
+  private readonly platform: NodeJS.Platform
+  private readonly killWindowsProcessTree: KillWindowsProcessTree
 
   constructor(options: CliProcessRunnerOptions = {}) {
-    this.spawnProcess = options.spawnProcess ?? spawn
+    const platform = options.platform ?? process.platform
+    this.spawnProcess =
+      options.spawnProcess ??
+      ((command, args, spawnOptions) => spawnCli(command, args, spawnOptions, platform))
     this.stderrLimitBytes = Math.max(0, options.stderrLimitBytes ?? DEFAULT_STDERR_LIMIT_BYTES)
     this.now = options.now ?? (() => performance.now())
     this.ensureWorkDir = options.ensureWorkDir ?? ((cwd) => mkdirSync(cwd, { recursive: true }))
-    this.useProcessGroups = (options.platform ?? process.platform) !== 'win32'
+    this.useProcessGroups = platform !== 'win32'
     this.signalProcess = options.signalProcess ?? ((pid, signal) => process.kill(pid, signal))
+    this.platform = platform
+    this.killWindowsProcessTree = options.killWindowsProcessTree ?? killWindowsProcessTree
   }
 
   get activeCount(): number {
@@ -296,8 +307,8 @@ export class CliProcessRunner {
         })
         if (
           active.terminationReason &&
-          !active.forceKillSent &&
-          this.isProcessGroupAlive(active.child)
+          (active.terminationAttempt ||
+            (!active.forceKillSent && this.isProcessGroupAlive(active.child)))
         ) {
           active.pendingCloseResult = closeResult
           return
@@ -306,15 +317,18 @@ export class CliProcessRunner {
       })
 
       child.once('error', (error) => {
-        finalize(
-          result({
-            reason: active.terminationReason ?? 'spawn-error',
-            exitCode: null,
-            signal: null,
-            stderr: stderrOutput.toString('utf8'),
-            error,
-          }),
-        )
+        const errorResult = result({
+          reason: active.terminationReason ?? 'spawn-error',
+          exitCode: null,
+          signal: null,
+          stderr: stderrOutput.toString('utf8'),
+          error,
+        })
+        if (active.terminationReason && active.terminationAttempt) {
+          active.pendingCloseResult = errorResult
+          return
+        }
+        finalize(errorResult)
       })
     })
   }
@@ -345,22 +359,38 @@ export class CliProcessRunner {
     active.terminationReason ??= reason
     if (active.forceKillTimer || active.forceKillSent) return true
 
-    this.signalProcessTree(active.child, 'SIGTERM')
+    this.startTerminationAttempt(active, 'SIGTERM')
     active.forceKillTimer = setTimeout(() => {
       active.forceKillTimer = undefined
       active.forceKillSent = true
-      this.signalProcessTree(active.child, 'SIGKILL')
-      if (active.pendingCloseResult) active.finalize?.(active.pendingCloseResult)
+      this.startTerminationAttempt(active, 'SIGKILL')
+      if (active.pendingCloseResult && !active.terminationAttempt) {
+        active.finalize?.(active.pendingCloseResult)
+      }
     }, FORCE_KILL_DELAY_MS)
     return true
   }
 
-  private signalProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  private startTerminationAttempt(active: ActiveProcess, signal: NodeJS.Signals): void {
+    const attempt = this.signalProcessTree(active.child, signal)
+    if (!attempt) return
+    active.terminationAttempt = attempt
+    void attempt.finally(() => {
+      if (active.terminationAttempt !== attempt) return
+      active.terminationAttempt = undefined
+      if (active.pendingCloseResult) active.finalize?.(active.pendingCloseResult)
+    })
+  }
+
+  private signalProcessTree(
+    child: ChildProcess,
+    signal: NodeJS.Signals,
+  ): Promise<void> | undefined {
     const pid = child.pid
     if (this.useProcessGroups && typeof pid === 'number' && pid > 0) {
       try {
         this.signalProcess(-pid, signal)
-        return
+        return undefined
       } catch (error) {
         logger.warn(
           { pid, signal, error },
@@ -368,7 +398,11 @@ export class CliProcessRunner {
         )
       }
     }
+    if (this.platform === 'win32') {
+      return terminateCliProcess(child, signal, this.platform, this.killWindowsProcessTree)
+    }
     child.kill(signal)
+    return undefined
   }
 
   private isProcessGroupAlive(child: ChildProcess): boolean {
