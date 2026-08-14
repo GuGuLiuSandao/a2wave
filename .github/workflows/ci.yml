@@ -356,6 +356,7 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: |
+          # shellcheck disable=SC2016  # the ${} below are JS template literals inside a single-quoted node -e script, not shell expansions
           node -e '
             const needs = JSON.parse(process.env.NEEDS)
             const bad = []
