@@ -128,8 +128,19 @@ jobs:
             exit 1
           fi
 
+      # A prerelease must not become the default install. npm assigns `latest` to any
+      # publish that names no tag — including `0.7.3-rc.1`, which then lands on every
+      # plain `npm i -g a2wave` — so the dist-tag is chosen from the version's shape
+      # rather than left to npm: prereleases go to `next`, stable keeps `latest`.
       - name: Publish to npm
         working-directory: apps/cli
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --provenance --access public
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          case "${VERSION}" in
+            *-*) NPM_TAG=next ;;
+            *)   NPM_TAG=latest ;;
+          esac
+          echo "Publishing ${VERSION} under dist-tag ${NPM_TAG}"
+          npm publish --provenance --access public --tag "${NPM_TAG}"
