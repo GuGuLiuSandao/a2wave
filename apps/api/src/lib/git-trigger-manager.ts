@@ -11,6 +11,7 @@
  */
 import {
   GIT_TRIGGER_DEFAULT_INTERVAL_SECONDS,
+  GIT_TRIGGER_MAX_PAGE_BUDGET,
   GIT_TRIGGER_MAX_RUNS_PER_TICK,
   type GitTriggerConfig,
   type GitTriggerEvent,
@@ -22,16 +23,16 @@ import {
 import { and, eq } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { agents, gitTriggerStates, runs } from '../db/schema.js'
-import { taskQueueDb } from '../engine/task-queue-db.js'
 import { hasAdmissionCapacity, tryAcquireSlot } from '../engine/task-queue.js'
+import { taskQueueDb } from '../engine/task-queue-db.js'
 import { logBackgroundAudit } from './audit.js'
 import { executeChatRun } from './execute-chat-run.js'
 import { GitTriggerCliError, listOpenRequests } from './git-trigger-cli.js'
 import {
-  type GitTriggerFiredEvent,
-  type ObservedRequest,
   diffRepoState,
+  type GitTriggerFiredEvent,
   matchesFilters,
+  type ObservedRequest,
   renderGitTriggerIntent,
   repoStateKey,
   rollbackUnhandled,
@@ -411,6 +412,19 @@ class GitTriggerManager {
     // `RunBudget` for why this is a type rather than a bare counter.
     const budget = new RunBudget(GIT_TRIGGER_MAX_RUNS_PER_TICK)
 
+    /**
+     * List pages left for this tick, shared across entries.
+     *
+     * Without a shared budget the per-entry page cap and the entry cap multiply:
+     * five group entries at five pages each is 25 serial CLI calls, ~500s at the
+     * poll timeout, against a 30s minimum interval. That is the worst-case tick
+     * `GIT_TRIGGER_MAX_REPOS` exists to bound, so the pages are spent from one
+     * pool and the bound holds no matter how the entries are configured.
+     * Round-robin ordering means a namespace that consumes the pool does not
+     * permanently starve the entries behind it.
+     */
+    let pageBudget = GIT_TRIGGER_MAX_PAGE_BUDGET
+
     for (const repo of listings) {
       const repoKey = repoStateKey(repo)
 
@@ -436,7 +450,8 @@ class GitTriggerManager {
 
       let listing: Awaited<ReturnType<typeof listOpenRequests>>
       try {
-        listing = await listOpenRequests(provider, repo.project, repo.host)
+        listing = await listOpenRequests(provider, repo.project, repo.host, repo.scope, pageBudget)
+        pageBudget -= listing.pagesFetched
       } catch (err) {
         const message =
           err instanceof GitTriggerCliError ? err.message : String((err as Error)?.message ?? err)
@@ -582,9 +597,18 @@ class GitTriggerManager {
     fired: GitTriggerFiredEvent,
   ): Promise<'dispatched' | 'rejected'> {
     const { request, event } = fired
+    /**
+     * The repository this specific request lives in, not the entry that found
+     * it. Under a `group` or `all` scope those differ: the entry names a
+     * namespace, while every request belongs to one repository underneath it.
+     * Rendering the entry's path would hand the Agent a namespace where it
+     * expects a repository — and for `all` an empty string — so the Run would
+     * name no reachable target at all.
+     */
+    const project = request.project || repo.project
     const intent = renderGitTriggerIntent(config.intent, {
       event,
-      repo: repo.project,
+      repo: project,
       host: repo.host,
       number: request.number,
       title: request.title,
@@ -617,7 +641,7 @@ class GitTriggerManager {
     const channelResult = buildGitTriggerChannel({
       provider,
       event,
-      project: repo.project,
+      project,
       host: repo.host,
       number: request.number,
       url: request.url,
@@ -648,8 +672,12 @@ class GitTriggerManager {
       details: {
         provider,
         event,
-        project: repo.project,
+        project,
         ...(repo.host ? { host: repo.host } : {}),
+        // Recorded alongside the project so the audit trail says which watch
+        // entry produced the Run — a group entry and a direct one on the same
+        // repository are otherwise indistinguishable after the fact.
+        ...(repo.scope && repo.scope !== 'project' ? { scope: repo.scope } : {}),
         number: request.number,
         runId,
       },

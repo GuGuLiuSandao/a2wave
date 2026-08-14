@@ -3,15 +3,17 @@ import { agentSchema, publishChannelEnum } from '../schemas/agent.js'
 import {
   GIT_TRIGGER_DEFAULT_INTERVAL_SECONDS,
   GIT_TRIGGER_MAX_INTERVAL_SECONDS,
+  GIT_TRIGGER_MAX_PAGES,
   GIT_TRIGGER_MAX_REPOS,
   GIT_TRIGGER_MIN_INTERVAL_SECONDS,
   ghTriggerConfigSchema,
   gitTriggerConfigSchema,
   gitTriggerConfigSchemaFor,
+  gitTriggerScopeEnum,
   glabTriggerConfigSchema,
 } from '../schemas/git-trigger.js'
-import { runChannelContextSchema } from '../schemas/run-channel.js'
 import { runTriggerSourceEnum } from '../schemas/run.js'
+import { runChannelContextSchema } from '../schemas/run-channel.js'
 
 const validConfig = {
   provider: 'glab' as const,
@@ -102,6 +104,92 @@ describe('gitTriggerConfigSchema', () => {
       repos: [{ project: '  group/repo  ' }],
     })
     expect(parsed.repos[0].project).toBe('group/repo')
+  })
+})
+
+describe('watch scope', () => {
+  it('defaults to the project scope, so every stored config keeps its meaning', () => {
+    // Configs written before scope existed carry no `scope` key at all. If the
+    // default were anything but `project`, those would silently start watching a
+    // wider set than the user chose — a config change nobody made.
+    const parsed = gitTriggerConfigSchema.parse(validConfig)
+    expect(parsed.repos[0].scope).toBe('project')
+  })
+
+  it('accepts a group scope naming a namespace rather than a repository', () => {
+    // A group path is what the user reads off the browser URL when they want
+    // "this product line", and unlike a project it may be a single segment.
+    const parsed = gitTriggerConfigSchema.parse({
+      ...validConfig,
+      repos: [{ scope: 'group', project: 'acme/platform/sdk' }],
+    })
+    expect(parsed.repos[0].scope).toBe('group')
+    expect(parsed.repos[0].project).toBe('acme/platform/sdk')
+  })
+
+  it('rejects the retired instance-wide scope', () => {
+    // Measured against a real deployment, `scope=all` returned 402 open merge
+    // requests across nine unrelated top-level namespaces — enough to exhaust
+    // the whole tick page budget, so the open set could never be paged to the
+    // end and `closed` inference would be permanently suspended. It is not a
+    // scope a poll can serve correctly, so it is not offered.
+    expect(
+      gitTriggerConfigSchema.safeParse({ ...validConfig, repos: [{ scope: 'all' }] }).success,
+    ).toBe(false)
+  })
+
+  it('requires a project path for every scope', () => {
+    // Without this an empty path silently degrades to the whole instance —
+    // the widest possible scope reached by leaving a field blank.
+    for (const scope of ['project', 'group'] as const) {
+      expect(
+        gitTriggerConfigSchema.safeParse({ ...validConfig, repos: [{ scope, project: '' }] })
+          .success,
+      ).toBe(false)
+    }
+  })
+
+  it('rejects the group scope on GitHub', () => {
+    // The GitHub listing is a per-repository GraphQL query with no org-wide
+    // equivalent carrying the same fields. Accepting the scope here would
+    // validate a config the poller cannot honour.
+    expect(
+      ghTriggerConfigSchema.safeParse({
+        ...validConfig,
+        provider: 'gh',
+        repos: [{ scope: 'group', project: 'acme' }],
+      }).success,
+    ).toBe(false)
+    expect(
+      ghTriggerConfigSchema.safeParse({
+        ...validConfig,
+        provider: 'gh',
+        repos: [{ scope: 'project', project: 'acme/demo' }],
+      }).success,
+    ).toBe(true)
+  })
+
+  it('keeps both provider variants composable object schemas', () => {
+    // Enforcing the GitHub restriction with `.refine()` on the config turns the
+    // schema into a `ZodEffects`, which silently loses `.extend()`, `.pick()`
+    // and `.shape`. Nothing breaks today, but the next call site that composes
+    // it the way the glab variant already can would fail with a confusing type
+    // error — so the rule lives on the `repos` field instead.
+    for (const schema of [glabTriggerConfigSchema, ghTriggerConfigSchema]) {
+      expect(typeof schema.extend).toBe('function')
+      expect(schema.shape).toBeDefined()
+    }
+  })
+
+  it('exposes only the scopes a poll can serve', () => {
+    expect(gitTriggerScopeEnum.options).toEqual(['project', 'group'])
+  })
+
+  it('bounds the pages one scope may fetch per tick', () => {
+    // A group can hold far more open requests than one page. The cap is what
+    // keeps a wide scope from turning one tick into an unbounded sweep.
+    expect(GIT_TRIGGER_MAX_PAGES).toBeGreaterThan(1)
+    expect(GIT_TRIGGER_MAX_PAGES).toBeLessThanOrEqual(10)
   })
 })
 

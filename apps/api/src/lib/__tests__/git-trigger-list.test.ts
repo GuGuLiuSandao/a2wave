@@ -8,6 +8,7 @@
  * closed" — firing bogus Runs and deleting the fingerprints that would have
  * prevented them from re-firing as `opened` afterwards.
  */
+import { GIT_TRIGGER_MAX_PAGES } from '@a2wave/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const runStatusProbe = vi.fn()
@@ -139,15 +140,114 @@ describe('listOpenRequests — listing completeness', () => {
     expect(result.complete).toBe(true)
   })
 
-  it('reports a full page as possibly truncated', async () => {
+  it('reports a full page as possibly truncated, without paging a project', async () => {
     // 100 is the forges' page cap, so exactly 100 means "there may be more" —
     // and absence from a truncated page must not be read as closure.
+    //
+    // A single project deliberately does NOT page past it. One repository with
+    // more than a page of open merge requests is pathological, and paying the
+    // extra calls on every ordinary repository to cover it would tax the common
+    // case for the rare one; suspending closure inference already handles it.
     const full = Array.from({ length: 100 }, (_, i) => ({ iid: i + 1, sha: 'a', title: 't' }))
     runStatusProbe.mockResolvedValue(probeResult({ stdout: JSON.stringify(full) }))
 
     const result = await listOpenRequests('glab', 'group/repo')
     expect(result.requests).toHaveLength(100)
     expect(result.complete).toBe(false)
+    expect(runStatusProbe).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('listOpenRequests — wide scopes', () => {
+  /** A page of `count` requests, numbered from `start`, each in its own repo. */
+  function page(start: number, count: number) {
+    return Array.from({ length: count }, (_, i) => ({
+      iid: start + i,
+      sha: 'a',
+      title: 't',
+      references: { full: `group/repo-${start + i}!${start + i}` },
+    }))
+  }
+
+  it('follows pages until the group is exhausted', async () => {
+    // A namespace's size is a property of the organisation, not the config, so a
+    // group listing must page — otherwise the least recently updated requests
+    // are invisible and closure can never be proven for the group at all.
+    runStatusProbe
+      .mockResolvedValueOnce(probeResult({ stdout: JSON.stringify(page(1, 100)) }))
+      .mockResolvedValueOnce(probeResult({ stdout: JSON.stringify(page(101, 57)) }))
+
+    const result = await listOpenRequests('glab', 'acme', undefined, 'group')
+    expect(result.requests).toHaveLength(157)
+    expect(result.complete).toBe(true)
+    expect(runStatusProbe).toHaveBeenCalledTimes(2)
+  })
+
+  it('spends a caller-supplied page budget and reports what is left', async () => {
+    // The per-entry cap and the entry cap would otherwise multiply: five group
+    // entries at five pages each is 25 serial CLI calls, ~500s against a 30s
+    // minimum interval — silently invalidating the worst-case tick that
+    // GIT_TRIGGER_MAX_REPOS was chosen to satisfy.
+    runStatusProbe.mockResolvedValue(probeResult({ stdout: JSON.stringify(page(1, 100)) }))
+
+    const result = await listOpenRequests('glab', 'acme', undefined, 'group', 2)
+    expect(runStatusProbe).toHaveBeenCalledTimes(2)
+    expect(result.complete).toBe(false)
+    expect(result.pagesFetched).toBe(2)
+  })
+
+  it('reports pages fetched so the caller can charge the tick budget', async () => {
+    runStatusProbe.mockResolvedValueOnce(probeResult({ stdout: JSON.stringify(page(1, 3)) }))
+
+    const result = await listOpenRequests('glab', 'acme', undefined, 'group')
+    expect(result.pagesFetched).toBe(1)
+    expect(result.complete).toBe(true)
+  })
+
+  it('stops at the page budget and reports the listing incomplete', async () => {
+    // Beyond the budget the open set is unproven, so `closed` must not fire on
+    // absence. Reporting incomplete is what makes the diff suspend it.
+    runStatusProbe.mockResolvedValue(probeResult({ stdout: JSON.stringify(page(1, 100)) }))
+
+    const result = await listOpenRequests('glab', 'acme', undefined, 'group')
+    expect(result.complete).toBe(false)
+    expect(runStatusProbe).toHaveBeenCalledTimes(GIT_TRIGGER_MAX_PAGES)
+  })
+
+  it('asks for the group collection rather than a project', async () => {
+    runStatusProbe.mockResolvedValue(probeResult({ stdout: '[]' }))
+
+    await listOpenRequests('glab', 'acme/platform', undefined, 'group')
+    const [, argv] = runStatusProbe.mock.calls[0] as [string, string[]]
+    expect(argv[1]).toContain('groups/acme%2Fplatform/merge_requests')
+  })
+
+  it('leaves the project unset under the project scope, even though GitLab sends it', async () => {
+    // GitLab returns `references` on the PROJECT listing too, not only the group
+    // one. Attaching it unconditionally re-keyed every single-repository entry
+    // from `42` to `group/repo!42`, so the first poll after an upgrade matched
+    // none of the fingerprints written before it: every open request fired
+    // `opened` and every stored key fired `closed`. That is precisely the
+    // migration break `repoStateKey` is written to avoid, undone one layer down.
+    runStatusProbe.mockResolvedValue(
+      probeResult({
+        stdout: JSON.stringify([
+          { iid: 42, sha: 'a', title: 't', references: { full: 'group/repo!42' } },
+        ]),
+      }),
+    )
+
+    const result = await listOpenRequests('glab', 'group/repo')
+    expect(result.requests[0].project).toBeUndefined()
+  })
+
+  it('carries each request back with its own repository path', async () => {
+    // Under a group scope the entry names a namespace, so the per-request path
+    // is the only thing that can tell the Agent where to act.
+    runStatusProbe.mockResolvedValue(probeResult({ stdout: JSON.stringify(page(42, 1)) }))
+
+    const result = await listOpenRequests('glab', 'group', undefined, 'group')
+    expect(result.requests[0].project).toBe('group/repo-42')
   })
 
   it('reads the GitHub GraphQL envelope', async () => {

@@ -176,6 +176,61 @@ export function parseGitRepoUrl(input: string, provider?: GitRepoProvider): GitR
   return { host: '', project: toProject(segments, resolveIsGitHub(provider, '')) }
 }
 
+/**
+ * Parses a **namespace** URL — a GitLab group or subgroup — into its parts.
+ *
+ * Separate from `parseGitRepoUrl` because the two have genuinely different
+ * shapes, not merely different validation. A project needs at least
+ * `owner/repo`; a namespace may be a single segment (`acme` is a real
+ * top-level group), so running it through the project parser rejects the most
+ * ordinary group path there is. The routing rules are shared, though: a user is
+ * most likely to copy the URL of a group's merge request list, which carries
+ * GitLab's `/-/` separator and everything after it.
+ */
+export function parseGitNamespaceUrl(input: string): GitRepoLocation {
+  const trimmed = input.trim()
+  if (!trimmed) return EMPTY
+
+  const withoutSuffix = trimmed.split(/[?#]/)[0] ?? ''
+  if (!withoutSuffix) return EMPTY
+
+  const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(withoutSuffix)
+  const withoutScheme = withoutSuffix.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '')
+  const withoutUserInfo = withoutScheme.replace(/^[^@/]+@/, '')
+
+  const segments = withoutUserInfo.split('/').filter(Boolean)
+  if (segments.length === 0) return EMPTY
+
+  const [first, ...rest] = segments
+  if (!first) return EMPTY
+
+  const isHost = hasScheme || looksLikeHost(first)
+  const rawPath = isHost ? rest : segments
+  const host = isHost ? first : ''
+
+  /**
+   * GitLab routes a *group* under `/groups/`, a project under nothing.
+   *
+   * This is the URL a user actually copies — the API's own `web_url` for a group
+   * is `https://host/groups/acme/platform`. Keeping the prefix yields the path
+   * `groups/acme/platform`, which contains a slash and so passes every
+   * validation, publishes green, and then 404s on every poll. Stripped only in
+   * the leading position, so a namespace genuinely called `groups` deeper in the
+   * path survives.
+   */
+  const pathSegments = rawPath[0] === 'groups' ? rawPath.slice(1) : rawPath
+
+  // Everything before GitLab's routing separator; a namespace never contains it.
+  const separatorIndex = pathSegments.indexOf(GITLAB_ROUTE_SEPARATOR)
+  const namespace = separatorIndex === -1 ? pathSegments : pathSegments.slice(0, separatorIndex)
+
+  // A host with no path names no namespace. Falling back to the host alone would
+  // quietly turn "this group" into "this entire instance".
+  if (namespace.length === 0) return EMPTY
+
+  return { host, project: stripGitSuffix(namespace.join('/')) }
+}
+
 /** Renders stored parts back into the URL the form displays. */
 export function formatGitRepoUrl({ host, project }: GitRepoLocation): string {
   if (!project) return host ? `https://${host}` : ''

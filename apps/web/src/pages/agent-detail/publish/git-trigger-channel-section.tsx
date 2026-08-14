@@ -13,10 +13,7 @@
  * misconfiguration (a channel that publishes fine and then silently fails every
  * poll) into something the user sees while configuring.
  */
-import { PromptEditor } from '@/components/prompt-editor'
-import { Badge } from '@/components/ui/badge'
-import { Label } from '@/components/ui/label'
-import { parseGitRepoUrl } from '@/lib/git-repo-url'
+
 import {
   GIT_TRIGGER_EVENTS,
   GIT_TRIGGER_INTENT_PLACEHOLDERS,
@@ -26,11 +23,14 @@ import {
   type GitTriggerCliStatus,
   type GitTriggerEvent,
   type GitTriggerProvider,
+  type GitTriggerScope,
 } from '@a2wave/shared'
 import { Button, Checkbox, InputNumber, Switch } from 'antd'
 import {
   AlertTriangle,
   CheckCircle2,
+  FolderTree,
+  GitBranch,
   Loader2,
   Plus,
   RefreshCw,
@@ -38,6 +38,11 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { PromptEditor } from '@/components/prompt-editor'
+import { Badge } from '@/components/ui/badge'
+import { Label } from '@/components/ui/label'
+import { ModePicker } from '@/components/ui/mode-picker'
+import { parseGitNamespaceUrl, parseGitRepoUrl } from '@/lib/git-repo-url'
 
 /**
  * One repository row.
@@ -53,6 +58,11 @@ export interface GitTriggerRepoDraft {
   url: string
   project: string
   host: string
+  /**
+   * How wide this row reaches. Optional so a draft restored from a config
+   * written before scopes existed reads as the project scope it was.
+   */
+  scope?: GitTriggerScope
 }
 
 /**
@@ -63,12 +73,19 @@ export interface GitTriggerRepoDraft {
  * a GitHub Enterprise install may live at any name, so guessing left GHE URLs
  * carrying their routing segments into a project the backend then rejected.
  * The form always knows which channel it is rendering, so it says so.
+ *
+ * The scope picks the parser, because a group and a project are different
+ * shapes: `acme` is a valid namespace but not a valid project, so
+ * parsing a group with the project rules rejects the most ordinary group path
+ * there is.
  */
 export function toGitTriggerRepoDraft(
   url: string,
   provider: GitTriggerProvider,
+  scope: GitTriggerScope = 'project',
 ): GitTriggerRepoDraft {
-  return { url, ...parseGitRepoUrl(url, provider) }
+  const parsed = scope === 'group' ? parseGitNamespaceUrl(url) : parseGitRepoUrl(url, provider)
+  return { url, ...parsed, scope }
 }
 
 /**
@@ -244,25 +261,48 @@ export function GitTriggerChannelSection({
         </p>
         <div className="space-y-3">
           {repos.map((repo, index) => {
+            const scope = repo.scope ?? 'project'
             const invalid = repo.url.trim().length > 0 && !repo.project
             return (
               // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional and reorderable only by add/remove
-              <div key={index} className="space-y-1">
-                <div className="flex items-start gap-2">
-                  <input
-                    value={repo.url}
-                    onChange={(event) =>
-                      updateRepo(index, toGitTriggerRepoDraft(event.target.value, provider))
-                    }
-                    placeholder={t(
-                      isGitlab
-                        ? 'agentPublish.glabRepoPlaceholder'
-                        : 'agentPublish.ghRepoPlaceholder',
-                    )}
-                    className={`min-w-0 flex-1 rounded-md border bg-background px-3 py-2 font-mono text-sm outline-none focus:border-primary ${
-                      invalid ? 'border-destructive' : 'border-border'
-                    }`}
-                  />
+              <div key={index} className="space-y-2 rounded-md border border-border p-3">
+                <div className="flex items-start justify-between gap-2">
+                  {/* GitLab only: the gh listing is a per-repository GraphQL
+                      query with no org-wide equivalent carrying head SHA and
+                      comment counts, so offering the choice there would let the
+                      user save a config the poller cannot honour. */}
+                  {isGitlab ? (
+                    // Label on its own row above the control, per the design
+                    // doc — sharing a row with the delete button made the picker
+                    // read as a toolbar affordance rather than the field it is.
+                    <div className="flex flex-col items-start gap-1.5">
+                      <Label className="text-sm">{t('agentPublish.gitTriggerScopeLabel')}</Label>
+                      <ModePicker
+                        value={scope}
+                        onChange={(value) =>
+                          // Re-parse rather than carry the text across: the same
+                          // string means different things under the two parsers,
+                          // so keeping the old parse would leave the row showing
+                          // a project path while claiming to watch a group.
+                          updateRepo(index, toGitTriggerRepoDraft(repo.url, provider, value))
+                        }
+                        options={[
+                          {
+                            value: 'project',
+                            label: t('agentPublish.gitTriggerScopeProject'),
+                            icon: GitBranch,
+                          },
+                          {
+                            value: 'group',
+                            label: t('agentPublish.gitTriggerScopeGroup'),
+                            icon: FolderTree,
+                          },
+                        ]}
+                      />
+                    </div>
+                  ) : (
+                    <span />
+                  )}
                   <Button
                     danger
                     type="text"
@@ -272,24 +312,49 @@ export function GitTriggerChannelSection({
                     aria-label={t('agentPublish.gitTriggerRemoveRepo')}
                   />
                 </div>
+                <input
+                  value={repo.url}
+                  onChange={(event) =>
+                    updateRepo(index, toGitTriggerRepoDraft(event.target.value, provider, scope))
+                  }
+                  placeholder={t(
+                    scope === 'group'
+                      ? 'agentPublish.gitTriggerGroupPlaceholder'
+                      : isGitlab
+                        ? 'agentPublish.glabRepoPlaceholder'
+                        : 'agentPublish.ghRepoPlaceholder',
+                  )}
+                  className={`w-full min-w-0 rounded-md border bg-background px-3 py-2 font-mono text-sm outline-none focus:border-primary ${
+                    invalid ? 'border-destructive' : 'border-border'
+                  }`}
+                />
                 {/* Echo the split back: the config stores host and project
                     separately and the poll uses them separately, so the user
                     can see what their URL actually resolved to. */}
                 {invalid && (
                   <p className="text-xs text-destructive">
-                    {t('agentPublish.gitTriggerRepoInvalid')}
+                    {t(
+                      scope === 'group'
+                        ? 'agentPublish.gitTriggerGroupInvalid'
+                        : 'agentPublish.gitTriggerRepoInvalid',
+                    )}
                   </p>
                 )}
                 {!invalid && repo.project && (
                   <p className="text-xs text-muted-foreground">
                     {repo.host
-                      ? t('agentPublish.gitTriggerRepoParsed', {
-                          host: repo.host,
-                          project: repo.project,
-                        })
-                      : t('agentPublish.gitTriggerRepoParsedDefaultHost', {
-                          project: repo.project,
-                        })}
+                      ? t(
+                          scope === 'group'
+                            ? 'agentPublish.gitTriggerGroupParsed'
+                            : 'agentPublish.gitTriggerRepoParsed',
+                          { host: repo.host, project: repo.project },
+                        )
+                      : t(
+                          scope === 'group'
+                            ? 'agentPublish.gitTriggerGroupParsedDefaultHost'
+                            : 'agentPublish.gitTriggerRepoParsedDefaultHost',
+                          { project: repo.project },
+                        )}
                   </p>
                 )}
               </div>
@@ -299,7 +364,9 @@ export function GitTriggerChannelSection({
         <Button
           size="small"
           disabled={repos.length >= GIT_TRIGGER_MAX_REPOS}
-          onClick={() => onReposChange([...repos, { url: '', project: '', host: '' }])}
+          onClick={() =>
+            onReposChange([...repos, { url: '', project: '', host: '', scope: 'project' }])
+          }
           icon={<Plus className="h-3.5 w-3.5" />}
         >
           {t('agentPublish.gitTriggerAddRepo')}

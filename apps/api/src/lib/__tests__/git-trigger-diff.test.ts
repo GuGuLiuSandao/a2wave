@@ -1,10 +1,10 @@
 import type { GitTriggerEvent, GitTriggerRepoState } from '@a2wave/shared'
 import { describe, expect, it } from 'vitest'
 import {
-  MAX_RETAINED_REQUESTS,
-  type ObservedRequest,
   diffRepoState,
+  MAX_RETAINED_REQUESTS,
   matchesFilters,
+  type ObservedRequest,
   renderGitTriggerIntent,
   repoStateKey,
 } from '../git-trigger-diff.js'
@@ -529,5 +529,113 @@ describe('repoStateKey', () => {
       'gitlab.example.com/a/b',
     )
     expect(repoStateKey({ project: 'a/b', host: 'h1' })).not.toBe(repoStateKey({ project: 'a/b' }))
+  })
+
+  it('keeps the project-scope key unchanged so stored state still matches', () => {
+    // Every row written before scopes existed was keyed without one. If the
+    // default scope changed the key, the next poll would find no state, treat a
+    // live repository as a cold start, and silently swallow everything that
+    // happened in between.
+    expect(repoStateKey({ project: 'a/b', scope: 'project' })).toBe('a/b')
+  })
+
+  it('separates a group from a project sharing its path', () => {
+    // `group:` is not decoration: a namespace and a repository can be written
+    // identically, and one state row shared between them would mix two
+    // completely different request sets into one fingerprint.
+    expect(repoStateKey({ project: 'acme', scope: 'group' })).not.toBe(
+      repoStateKey({ project: 'acme', scope: 'project' }),
+    )
+  })
+})
+
+describe('cross-repository identity under a wide scope', () => {
+  it('does not confuse the same request number in two repositories', () => {
+    // A merge request number is unique only within its repository. Keying on the
+    // number alone made `repo-a!42` and `repo-b!42` one entry, so the second
+    // listed overwrote the first's fingerprint: one repository's push read as
+    // the other's, firing a bogus `updated` while a real change went unseen.
+    const previous: GitTriggerRepoState = {
+      requests: {
+        'group/repo-a!42': { number: 42, sha: 'aaa', comments: 0, project: 'group/repo-a' },
+        'group/repo-b!42': { number: 42, sha: 'bbb', comments: 0, project: 'group/repo-b' },
+      },
+    }
+    const result = diffRepoState({
+      previous,
+      observed: [
+        makeRequest({ number: 42, sha: 'aaa', project: 'group/repo-a' }),
+        // Only repo-b moved.
+        makeRequest({ number: 42, sha: 'ccc', project: 'group/repo-b' }),
+      ],
+      events: ALL_EVENTS,
+      polledAt: POLLED_AT,
+    })
+
+    expect(result.fired).toHaveLength(1)
+    expect(result.fired[0].event).toBe('updated')
+    expect(result.fired[0].request.project).toBe('group/repo-b')
+    // The untouched repository keeps its own fingerprint rather than inheriting
+    // the other's SHA.
+    expect(result.nextState.requests['group/repo-a!42'].sha).toBe('aaa')
+    expect(result.nextState.requests['group/repo-b!42'].sha).toBe('ccc')
+  })
+
+  it('does not advance a deferred request whose key is project-qualified', () => {
+    // The per-tick cap defers work, and a deferred request's fingerprint must
+    // NOT advance — nothing acted on the change, so the next tick has to
+    // re-detect it. The deferral set was built from bare numbers while being
+    // looked up with project-qualified keys, so under a wide scope no deferred
+    // request ever matched: its fingerprint advanced past a change no Run
+    // handled and the event was lost for good, not merely delayed. That is the
+    // exact violation this module's header calls out as its one rule.
+    const previous: GitTriggerRepoState = {
+      requests: {
+        'group/repo-a!1': { number: 1, sha: 'old1', comments: 0, project: 'group/repo-a' },
+        'group/repo-b!2': { number: 2, sha: 'old2', comments: 0, project: 'group/repo-b' },
+      },
+    }
+    const result = diffRepoState({
+      previous,
+      observed: [
+        makeRequest({ number: 1, sha: 'new1', project: 'group/repo-a' }),
+        makeRequest({ number: 2, sha: 'new2', project: 'group/repo-b' }),
+      ],
+      events: ALL_EVENTS,
+      polledAt: POLLED_AT,
+      maxRunsPerTick: 1,
+    })
+
+    expect(result.fired).toHaveLength(1)
+    expect(result.deferred).toHaveLength(1)
+    const deferredKey = `${result.deferred[0].request.project}!${result.deferred[0].request.number}`
+    // The deferred entry keeps its OLD fingerprint so the next tick sees the
+    // delta again.
+    expect(result.nextState.requests[deferredKey].sha).toBe(previous.requests[deferredKey].sha)
+  })
+
+  it('reports a closed request against the repository it lived in', () => {
+    // Closure is inferred from absence, so the fingerprint is the only surviving
+    // record of which repository the request belonged to.
+    const result = diffRepoState({
+      previous: {
+        requests: {
+          'group/repo-a!7': {
+            number: 7,
+            sha: 'a',
+            comments: 0,
+            project: 'group/repo-a',
+            title: 'ship it',
+          },
+        },
+      },
+      observed: [],
+      events: ALL_EVENTS,
+      polledAt: POLLED_AT,
+    })
+
+    expect(result.fired).toHaveLength(1)
+    expect(result.fired[0].event).toBe('closed')
+    expect(result.fired[0].request.project).toBe('group/repo-a')
   })
 })
