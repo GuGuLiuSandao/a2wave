@@ -15,7 +15,7 @@
  * fully simulate update/delete chains for unrelated assertions.
  */
 import { Hono } from 'hono'
-import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
 import { z } from 'zod'
 
 vi.mock('../../db/client.js', () => ({
@@ -128,9 +128,8 @@ vi.mock('@a2wave/shared', async () => {
 
 import { db } from '../../db/client.js'
 import { AppError } from '../../lib/errors.js'
-import { createTestAgent } from '../../test/factories.js'
-
 import { asyncQuery } from '../../test/async-query.js'
+import { createTestAgent } from '../../test/factories.js'
 
 const mockDb = db as unknown as {
   select: Mock

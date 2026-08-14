@@ -273,9 +273,8 @@ vi.mock('../streaming-card-registry.js', () => ({
 
 // ── Import after mocks ───────────────────────────────────────────
 
+import { asyncQuery } from '../../test/async-query.js'
 import {
-  FEISHU_MESSAGE_RESOURCE_MAX_BYTES,
-  type FeishuConfig,
   buildDebugInfoSuffix,
   buildFeishuContext,
   buildFeishuFallbackText,
@@ -284,6 +283,8 @@ import {
   extractFileMeta,
   extractImageKeys,
   extractText,
+  FEISHU_MESSAGE_RESOURCE_MAX_BYTES,
+  type FeishuConfig,
   feishuConnectionManager,
   feishuSafeFileNameForDisk,
   fetchFeishuUserInfo,
@@ -298,8 +299,6 @@ import {
   textToPostContent,
 } from '../feishu-service.js'
 import type { LifecyclePlugin } from '../pipeline/types.js'
-
-import { asyncQuery } from '../../test/async-query.js'
 
 afterEach(() => {
   vi.unstubAllEnvs()

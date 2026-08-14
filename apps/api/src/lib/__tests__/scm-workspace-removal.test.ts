@@ -15,12 +15,12 @@ vi.mock('../logger.js', () => ({
 
 import { processInstanceId } from '../process-instance.js'
 import {
-  WorkspaceRemovalBlockedError,
   clearWorkspaceRemovalsOnStartup,
   drainPendingWorkspaceRemovalReleases,
   removeOwnedSourceWorkspaceGuarded,
   removeSourceWorkspaceGuarded,
   retryPendingWorkspaceRemovalReleases,
+  WorkspaceRemovalBlockedError,
 } from '../scm-workspace-removal.js'
 
 interface Row {

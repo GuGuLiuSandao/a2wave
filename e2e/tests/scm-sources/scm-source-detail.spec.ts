@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test'
 import {
-  type ScmSourceSummary,
   createScmSource,
   deleteScmSource,
   getAdminToken,
   listScmSources,
+  type ScmSourceSummary,
 } from '../../utils/api-helpers'
 import { loginAsAdmin } from '../../utils/auth'
 import { ROUTES } from '../../utils/test-constants'

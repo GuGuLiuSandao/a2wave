@@ -1,6 +1,6 @@
-import i18n from '@/i18n'
 import { type ClassValue, clsx } from 'clsx'
 import { extendTailwindMerge } from 'tailwind-merge'
+import i18n from '@/i18n'
 
 /**
  * tailwind-merge only knows the stock scale, so a custom `--text-*` rung reads

@@ -8,9 +8,8 @@
  * else's source id cannot be used to borrow their credentials.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createTestApp } from '../../test/test-app.js'
-
 import { asyncQuery } from '../../test/async-query.js'
+import { createTestApp } from '../../test/test-app.js'
 
 const { mockCheckGit, mockCheckP4, mockSourceRow, lastWhere } = vi.hoisted(() => ({
   mockCheckGit: vi.fn(),

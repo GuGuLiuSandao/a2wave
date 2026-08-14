@@ -94,9 +94,8 @@ vi.mock('../slug.js', () => ({
   slugify: vi.fn((name: string) => name.toLowerCase().replace(/\s+/g, '-')),
 }))
 
+import { asyncQuery } from '../../test/async-query.js'
 import {
-  WorkspaceOccupancyRecordError,
-  WorktreeOccupiedError,
   _resetTtlCleanupDebounce,
   buildAgentConfig,
   injectScmEnv,
@@ -104,9 +103,9 @@ import {
   resolveCleanupWorkDirs,
   resolveWorkDir,
   validateAgentProviderConfiguration,
+  WorkspaceOccupancyRecordError,
+  WorktreeOccupiedError,
 } from '../agent-helpers.js'
-
-import { asyncQuery } from '../../test/async-query.js'
 
 function chainResult(value: unknown) {
   // An array stands for a multi-row result and must surface through `all`; the

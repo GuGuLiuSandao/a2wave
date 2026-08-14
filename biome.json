@@ -14,7 +14,8 @@
       "!!**/.understand-anything",
       "!!**/reports/mutation",
       "!!**/apps/api/drizzle/meta",
-      "!!**/apps/api/drizzle-pg/meta"
+      "!!**/apps/api/drizzle-pg/meta",
+      "!!**/apps/cli/src/generated"
     ]
   },
   "linter": {

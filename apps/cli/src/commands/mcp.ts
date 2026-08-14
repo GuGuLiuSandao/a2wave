@@ -1,8 +1,16 @@
 import { defineCommand } from 'citty'
 import { createClient, urlArg } from '../client.js'
 import { CliError } from '../errors.js'
-import { parseKeyValues, readJsonFile, toStringArray } from '../lib/args.js'
+import {
+  forceArgs,
+  parseKeyValues,
+  readJsonFile,
+  requireConfirmation,
+  resolveForceFlag,
+  toStringArray,
+} from '../lib/args.js'
 import { emit, jsonArg } from '../lib/output.js'
+import { pageArgs, pageQuery } from '../lib/paginate.js'
 
 interface McpServer {
   id: string
@@ -89,14 +97,16 @@ const mutationArgs = {
 }
 
 export const mcpCommand = defineCommand({
-  meta: { description: 'Manage MCP Servers' },
+  meta: { name: 'mcp', description: 'Manage MCP Servers' },
   subCommands: {
     list: defineCommand({
-      meta: { description: 'List all MCP Servers' },
-      args: { ...jsonArg, ...urlArg },
+      meta: { name: 'list', description: 'List all MCP Servers', agentMeta: { risk: 'read' } },
+      args: { ...jsonArg, ...pageArgs, ...urlArg },
       run: async ({ args }) => {
         const client = createClient({ url: args.url as string | undefined })
-        const result = await client.get<{ data: McpServer[] }>('/api/mcp-servers?pageSize=100')
+        const result = await client.get<{ data: McpServer[] }>(
+          `/api/mcp-servers?${pageQuery(args, 100)}`,
+        )
         if (emit(args, result)) return
         if (result.data.length === 0) {
           console.log('No MCP Servers')
@@ -120,7 +130,11 @@ export const mcpCommand = defineCommand({
     }),
 
     get: defineCommand({
-      meta: { description: 'Show MCP Server details (accepts ID or name)' },
+      meta: {
+        name: 'get',
+        description: 'Show MCP Server details (accepts ID or name)',
+        agentMeta: { risk: 'read' },
+      },
       args: {
         id: { type: 'positional', description: 'MCP Server ID or name', required: true },
         ...jsonArg,
@@ -150,7 +164,7 @@ export const mcpCommand = defineCommand({
     }),
 
     create: defineCommand({
-      meta: { description: 'Create an MCP Server' },
+      meta: { name: 'create', description: 'Create an MCP Server', agentMeta: { risk: 'write' } },
       args: { ...mutationArgs, ...urlArg },
       run: async ({ args }) => {
         const client = createClient({ url: args.url as string | undefined })
@@ -161,7 +175,11 @@ export const mcpCommand = defineCommand({
     }),
 
     update: defineCommand({
-      meta: { description: 'Update an MCP Server (accepts ID or name)' },
+      meta: {
+        name: 'update',
+        description: 'Update an MCP Server (accepts ID or name)',
+        agentMeta: { risk: 'write' },
+      },
       args: {
         id: { type: 'positional', description: 'MCP Server ID or name', required: true },
         ...mutationArgs,
@@ -180,14 +198,25 @@ export const mcpCommand = defineCommand({
     }),
 
     delete: defineCommand({
-      meta: { description: 'Delete an MCP Server (accepts ID or name)' },
+      meta: {
+        name: 'delete',
+        description: 'Delete an MCP Server (accepts ID or name)',
+        agentMeta: { risk: 'high-risk-write' },
+      },
       args: {
         id: { type: 'positional', description: 'MCP Server ID or name', required: true },
+        ...forceArgs,
         ...urlArg,
       },
       run: async ({ args }) => {
         const client = createClient({ url: args.url as string | undefined })
+        // Resolve first so the confirmation names the ID actually being deleted.
         const id = await client.resolveMcpServerId(args.id as string)
+        await requireConfirmation(
+          'high-risk-write',
+          `This will permanently delete MCP Server ${id} (${args.id}). This action is irreversible.`,
+          resolveForceFlag(args),
+        )
         await client.del(`/api/mcp-servers/${id}`)
         console.log('MCP Server deleted ✓')
       },
@@ -195,10 +224,13 @@ export const mcpCommand = defineCommand({
 
     tools: defineCommand({
       meta: {
+        name: 'tools',
+        agentMeta: { risk: 'read' },
         description: 'Connect and list the tools this MCP Server exposes (for troubleshooting)',
       },
       args: {
         id: { type: 'positional', description: 'MCP Server ID or name', required: true },
+        ...jsonArg,
         ...urlArg,
       },
       run: async ({ args }) => {
@@ -207,6 +239,7 @@ export const mcpCommand = defineCommand({
         const { data } = await client.get<{
           data: { tools: Array<{ name: string; description?: string }> }
         }>(`/api/mcp-servers/${id}/tools`)
+        if (emit(args, data)) return
         const tools = data.tools ?? []
         if (tools.length === 0) {
           console.log('This MCP Server exposes no tools')

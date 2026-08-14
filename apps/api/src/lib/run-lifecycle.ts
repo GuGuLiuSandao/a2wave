@@ -1,8 +1,8 @@
 import { join } from 'node:path'
 import {
+  artifactPolicySchema,
   type RunChannelContextDiscord,
   type RunChannelContextSlack,
-  artifactPolicySchema,
 } from '@a2wave/shared'
 /**
  * Run lifecycle helpers — centralize the repeated pattern of:
@@ -14,8 +14,8 @@ import { agents, chatMessages, runSteps, runs, scmSources } from '../db/schema.j
 import { withTransaction } from '../db/transaction.js'
 import { extractUsageFromError } from '../engine/cli-engine-base.js'
 import { completeExecutionLease } from '../engine/execution-lease-registry.js'
-import { taskQueueDb } from '../engine/task-queue-db.js'
 import { scheduleNext } from '../engine/task-queue.js'
+import { taskQueueDb } from '../engine/task-queue-db.js'
 import type { StreamLogEntry, TokenUsage } from '../engine/types.js'
 import type { ExecuteWorkerResult } from '../worker/types.js'
 import { buildArtifactLinkLines } from './artifact-links.js'

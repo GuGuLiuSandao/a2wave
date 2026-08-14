@@ -87,9 +87,8 @@ vi.mock('../../engine/task-queue-db.js', () => ({
   taskQueueDb: {},
 }))
 
-import app from '../a2a.js'
-
 import { asyncQuery } from '../../test/async-query.js'
+import app from '../a2a.js'
 
 describe('public A2A run recording', () => {
   beforeEach(() => {

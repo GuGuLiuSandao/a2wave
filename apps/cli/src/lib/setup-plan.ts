@@ -69,7 +69,7 @@ export function generateProjectName(): string {
 // Docker image reference charset (name[:tag][@digest]). Anything outside this
 // (newlines, spaces, quotes, '#') could inject extra compose directives when
 // interpolated into the generated YAML.
-const IMAGE_REF_PATTERN = /^[a-z0-9]+(?:[._\-/:][a-zA-Z0-9._\-]+)*(?:@sha256:[a-f0-9]+)?$/
+const IMAGE_REF_PATTERN = /^[a-z0-9]+(?:[._\-/:][a-zA-Z0-9._-]+)*(?:@sha256:[a-f0-9]+)?$/
 
 /** Reject image refs that are not a plain docker reference (YAML-injection guard). */
 export function validateImageRef(ref: string): void {

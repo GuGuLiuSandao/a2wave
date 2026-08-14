@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { createInterface } from 'node:readline/promises'
 import { CliError } from '../errors.js'
+import type { CommandRisk } from './agent-meta.js'
 
 type OptionDefinition = {
   alias?: string | string[]
@@ -148,7 +149,17 @@ export function parseIntFlag(
 export async function confirmDestructive(message: string, force: boolean): Promise<void> {
   if (force) return
   if (!process.stdin.isTTY) {
-    throw new CliError(`${message}\nIn a non-interactive environment, add --force to confirm.`)
+    // The single most likely error an agent hits, since it never has a TTY.
+    // A stable type plus a runnable hint lets it decide whether to re-run with
+    // --force or stop and ask the human, without parsing the sentence. The
+    // sentence keeps saying it too — the structured fields are for the machine,
+    // and dropping the human-readable instruction to avoid repeating itself
+    // would make the plain-text mode strictly worse.
+    throw new CliError(`${message}\nIn a non-interactive environment, add --force to confirm.`, {
+      type: 'confirmation',
+      subtype: 'confirmation_required',
+      hint: '--force',
+    })
   }
   const rl = createInterface({ input: process.stdin, output: process.stdout })
   try {
@@ -159,4 +170,56 @@ export async function confirmDestructive(message: string, force: boolean): Promi
   } finally {
     rl.close()
   }
+}
+
+/**
+ * Gate a command on its own risk label.
+ *
+ * This is `confirmDestructive` with the decision of *whether to ask* moved in,
+ * so the `agentMeta.risk` a command declares and the confirmation it actually
+ * enforces cannot disagree. `read` and `write` pass straight through — a plain
+ * write must stay behaviorally unchanged, and prompting on every update is how
+ * a caller learns to pass `--yes` unconditionally, at which point the flag
+ * protects nothing.
+ *
+ * Only `high-risk-write` reaches the prompt, and it inherits the semantics an
+ * agent already relies on: `--force` proceeds, a non-TTY THROWS rather than
+ * running silently, and the error carries `type: 'confirmation'` with a
+ * runnable hint.
+ */
+export async function requireConfirmation(
+  risk: CommandRisk,
+  message: string,
+  force: boolean,
+): Promise<void> {
+  if (risk !== 'high-risk-write') return
+  await confirmDestructive(message, force)
+}
+
+/**
+ * `--yes` is an alias of `--force`, not a second flag.
+ *
+ * `api` spelled it `--yes` while every delete spelled it `--force`, and an agent
+ * that learned one spelling hit a confirmation error with the other. Both are
+ * read here so a command can accept either without each one re-deriving the
+ * rule.
+ */
+export function resolveForceFlag(args: Record<string, unknown>): boolean {
+  return args.force === true || args.yes === true
+}
+
+/**
+ * Shared args fragment for a `high-risk-write` command.
+ *
+ * `--yes` is declared as its own boolean rather than as a citty alias because
+ * citty has no alias mechanism for boolean flags — `resolveForceFlag` reads
+ * both. Both spellings are documented so `--help` shows the one the caller
+ * already knows.
+ */
+export const forceArgs = {
+  force: {
+    type: 'boolean' as const,
+    description: 'Skip confirmation (required in a non-interactive environment)',
+  },
+  yes: { type: 'boolean' as const, description: 'Alias of --force' },
 }

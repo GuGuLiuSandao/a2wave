@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  _resumeEvaluationQueuePromotionsForTests,
   EVALUATION_MAX_QUEUE_LENGTH,
   type EvaluationQueueDb,
   type EvaluationTaskRow,
-  _resumeEvaluationQueuePromotionsForTests,
   pauseEvaluationQueuePromotions,
   recoverEvaluationsOnStartup,
   scheduleNextEvaluation,

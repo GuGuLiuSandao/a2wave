@@ -3,8 +3,8 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -19,9 +19,9 @@ import { assertKnownOptions } from '../lib/args.js'
 import { submitInitialAdminPassword } from '../lib/initial-admin.js'
 import { readSecret } from '../lib/prompt.js'
 import {
-  DEFAULT_PORT,
   buildComposeFile,
   buildEnvFile,
+  DEFAULT_PORT,
   generateAuthSecret,
   generatePostgresPassword,
   generateProjectName,
@@ -1264,6 +1264,8 @@ async function upgrade(
 
 export const setupCommand = defineCommand({
   meta: {
+    name: 'setup',
+    agentMeta: { risk: 'write' },
     description:
       'Install a local a2wave platform: generate .env + docker-compose.yml, start the container, and wait until healthy. Use --upgrade to move an existing install to a new image, or --down to uninstall.',
   },

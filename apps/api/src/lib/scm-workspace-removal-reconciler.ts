@@ -3,8 +3,8 @@ import { and, eq } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { scmSources, scmWorkspaceRemovals } from '../db/schema.js'
 import {
-  type InstanceLivenessMap,
   canJudgePeerLiveness,
+  type InstanceLivenessMap,
   isInstanceOwnerDead,
   loadInstanceLiveness,
 } from './instance-heartbeat.js'

@@ -14,8 +14,8 @@ import type { TransactionHandle } from '../db/transaction.js'
 import { listActiveExecutionLeases } from '../engine/execution-lease-registry.js'
 import { writeBackgroundAudit } from './audit.js'
 import {
-  type InstanceLivenessMap,
   canJudgePeerLiveness,
+  type InstanceLivenessMap,
   isInstanceOwnerDead,
   loadInstanceLiveness,
 } from './instance-heartbeat.js'

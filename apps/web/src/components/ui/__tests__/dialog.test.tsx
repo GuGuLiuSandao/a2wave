@@ -1,6 +1,6 @@
-import { cn } from '@/lib/utils'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import { cn } from '@/lib/utils'
 import { Dialog, DialogContent, DialogTitle } from '../dialog'
 
 describe('DialogTitle', () => {

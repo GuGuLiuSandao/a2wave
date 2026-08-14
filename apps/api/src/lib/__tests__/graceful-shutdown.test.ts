@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SHUTDOWN_HARD_TIMEOUT_MS, runGracefulShutdownSequence } from '../graceful-shutdown.js'
+import { runGracefulShutdownSequence, SHUTDOWN_HARD_TIMEOUT_MS } from '../graceful-shutdown.js'
 
 describe('runGracefulShutdownSequence', () => {
   function makeDeps() {

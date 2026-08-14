@@ -34,9 +34,8 @@ vi.mock('../skill-storage.js', () => ({
 vi.mock('../id.js', () => ({ createId: (prefix?: string) => `${prefix}_test` }))
 vi.mock('../url-safety.js', () => ({ isBlockedHost: () => false }))
 
-import { importAgentFromZip } from '../agent-import.js'
-
 import { asyncQuery } from '../../test/async-query.js'
+import { importAgentFromZip } from '../agent-import.js'
 
 function buildNativeChatExportZip(
   a2aRouteTargets: unknown = null,

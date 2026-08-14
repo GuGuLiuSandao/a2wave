@@ -9,15 +9,15 @@ import {
   listActiveExecutionLeases,
 } from '../execution-lease-registry.js'
 import {
+  _resumeTaskQueuePromotionsForTests,
   DEFAULT_PENDING_ORPHAN_TIMEOUT_MS,
   MAX_QUEUE_LENGTH,
-  type TaskQueueDb,
-  _resumeTaskQueuePromotionsForTests,
   parsePendingOrphanTimeoutMs,
   pauseTaskQueuePromotions,
   recoverOnStartup,
   scheduleNext,
   sweepStaleLeases,
+  type TaskQueueDb,
   tryAcquireSlot,
 } from '../task-queue.js'
 

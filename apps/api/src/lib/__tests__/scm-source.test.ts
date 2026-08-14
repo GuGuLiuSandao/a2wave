@@ -18,7 +18,7 @@ vi.mock('../scm-workspace-safety.js', () => ({
   assertStoredScmWorkspacesRoot: (source: unknown) => mockAssertStoredScmWorkspacesRoot(source),
 }))
 
-import { type ScmSourceRow, createScmSource } from '../scm-source.js'
+import { createScmSource, type ScmSourceRow } from '../scm-source.js'
 
 function makeGitSourceRow(overrides?: Partial<ScmSourceRow>): ScmSourceRow {
   return {

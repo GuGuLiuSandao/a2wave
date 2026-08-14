@@ -1,3 +1,31 @@
+import type { ScmSourceConfig } from '@a2wave/shared'
+import { Dropdown, Segmented, Tooltip } from 'antd'
+import {
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  FolderGit2,
+  FolderOpen,
+  GitBranch,
+  HardDrive,
+  HelpCircle,
+  Loader2,
+  MoreHorizontal,
+  PlugZap,
+  Plus,
+  RefreshCw,
+  Save,
+  Trash2,
+  X,
+  XCircle,
+} from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { useFieldArray, useForm } from 'react-hook-form'
+import { useTranslation } from 'react-i18next'
 import {
   AlertDialog,
   AlertDialogContent,
@@ -28,34 +56,6 @@ import { formatApiError } from '@/lib/api-error'
 import { confirm } from '@/lib/confirm'
 import { idSuffix } from '@/lib/id-suffix'
 import { cn, formatRelativeTime } from '@/lib/utils'
-import type { ScmSourceConfig } from '@a2wave/shared'
-import { Dropdown, Segmented, Tooltip } from 'antd'
-import {
-  AlertCircle,
-  AlertTriangle,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  Eye,
-  EyeOff,
-  FolderGit2,
-  FolderOpen,
-  GitBranch,
-  HardDrive,
-  HelpCircle,
-  Loader2,
-  MoreHorizontal,
-  PlugZap,
-  Plus,
-  RefreshCw,
-  Save,
-  Trash2,
-  X,
-  XCircle,
-} from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
-import { useFieldArray, useForm } from 'react-hook-form'
-import { useTranslation } from 'react-i18next'
 
 /** Strip the Node.js execFile "Command failed: p4/git ..." wrapper, keep the real error. */
 function formatSyncError(msg: string): string {

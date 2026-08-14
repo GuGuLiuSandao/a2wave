@@ -10,13 +10,19 @@ src/
 │   ├── setup.ts      # setup (local platform install via docker compose)
 │   ├── login.ts      # login / logout
 │   ├── oauth.ts      # IDaaS OAuth browser flow used by login
-│   ├── status.ts     # status (self-check: URL / credentials / health / current user)
+│   ├── status.ts     # status (self-check narrative; renders lib/checks.ts)
+│   ├── whoami.ts     # whoami (cheap identity read: one /api/auth/me call)
+│   ├── doctor.ts     # doctor (same probes as an addressable checklist; exit 1 on fail)
+│   ├── api.ts        # api (raw HTTP escape hatch for uncovered endpoints)
 │   ├── config.ts     # config set-url / get / unset-url
-│   ├── skills.ts     # skills list/get/create/install/check-update/update-remote/update/delete
+│   ├── skills.ts     # skills list/get/create/install/check-update/update-remote/update/delete + files
+│   ├── skill-groups.ts # skill-groups list/get/create/update/delete (the values --group accepts)
 │   ├── agents.ts     # agents list/get/update/delete/stats + export/import/members/artifacts/memory + lifecycle
-│   ├── chat.ts       # chat send (one-shot + interactive) / chat list / chat messages
+│   ├── chat.ts       # chat send (one-shot + interactive, --attach) / chat list / chat messages
+│   ├── channels.ts   # channels set / chat-app (per-channel config WITHOUT republishing)
 │   ├── eval.ts       # eval sets / cases / run / tasks (evaluation replay + manual verdicts)
 │   ├── mcp.ts        # mcp list / get / create / update / delete / tools
+│   ├── memory.ts     # memory files list/get/put/delete + topics list/recall/remember
 │   ├── scm.ts        # scm list/get/create/update/delete/sync/check/status + workspaces/codegraph
 │   ├── kb.ts         # kb (knowledge base) list/get/create/upload/update/delete/sync/content
 │   ├── providers.ts  # providers list/get/login-status/dependents (read-only)
@@ -27,7 +33,10 @@ src/
 ├── lib/
 │   ├── agent-yaml.ts # YAML parsing / reference resolution / diff for agents apply
 │   ├── args.ts       # Shared flag utilities: toStringArray / parseKeyValues / confirmDestructive
+│   ├── checks.ts     # Self-diagnosis probes as data; shared by status / doctor
+│   ├── fields.ts     # `--fields` dot-path projection (applied AFTER redaction — see below)
 │   ├── output.ts     # `--json` support: jsonArg flag fragment + emit() / wantsJson()
+│   ├── paginate.ts   # `--limit` / `--page`: pageArgs fragment + pageQuery()
 │   ├── prompt.ts     # readSecret(): echo-suppressed stdin read (login + setup password)
 │   ├── setup-plan.ts # docker-compose / .env generation for `a2wave setup`
 │   └── token-cache.ts# SSO OAuth token cache path resolution
@@ -84,7 +93,42 @@ pnpm --filter a2wave dev -- skills list
 | `a2wave login --no-browser` | Only reuse the existing cache, don't launch the browser |
 | `a2wave login --password` | Legacy username + password login (requires setting the instance URL first via `a2wave config set-url`) |
 | `a2wave logout` | Clear local credentials (keeps the SSO token cache) |
-| `a2wave status` | One-stop self-check: URL / IDaaS cache / a2wave credentials / backend health / current user. First choice for diagnosing "why 401" or "is the token expired" |
+| `a2wave status` | One-stop self-check: URL / IDaaS cache / a2wave credentials / backend health / current user. First choice for diagnosing "why 401" or "is the token expired". `--json` emits the same `CheckReport` as `doctor` |
+| `a2wave whoami` | "As whom, and against which instance, will my next command run?" **One request** (`/api/auth/me`) — cheap enough for an agent to call before a risky write. `--json` adds `isAdmin`, so a caller need not know the role string is spelled `admin` |
+| `a2wave doctor` | The same probes as `status`, rendered as an addressable checklist. **Exits 1 on any `fail`** |
+
+### Self-diagnosis: `status`, `whoami`, `doctor`
+
+All three read from one probing layer, [src/lib/checks.ts](./src/lib/checks.ts),
+so a probe can only be wrong in one place. What differs is the shape of the
+answer, and each shape exists for a different caller:
+
+| | Question | Cost |
+|---|---|---|
+| `whoami` | "Who am I acting as?" | 1 request |
+| `status` | "Is everything set up?" — a narrative for a human | 4 probes |
+| `doctor` | "Which precondition is broken?" — a checklist for a machine | 4 probes |
+
+`runChecks()` returns `{ok, checks[]}` where each check has a stable
+dot-separated `name` (`instance.url`, `instance.health`, `sso.cache`,
+`credentials.token`, `user.identity`), a three-state `status`, an ANSI-free
+`message`, a `hint` on every non-pass, and structured `detail`. An agent tests
+one precondition by name or the whole thing by `ok`.
+
+Three rules the model depends on:
+
+- **`warn` does not flip `ok`.** Half of what this reports is optional (an SSO
+  cache on a password-login install) or merely blocked on an earlier failure.
+  Letting those read as failures is exactly the noise that teaches a caller to
+  ignore a health signal — and `doctor`'s exit code with it.
+- **A hint must be able to work.** A reachability failure is *not* fixed by
+  `config set-url`: the URL is already set, which is how we got far enough to
+  dial it. An agent acting on a hint that cannot work is worse off than one
+  given none, so `instance.health` says to check the instance is running.
+- **No ANSI and no cleartext credential in `checks.ts`.** Colour belongs to the
+  renderer; an escape sequence inside a JSON payload is garbage to every
+  non-terminal consumer. `detail` is emitted verbatim under `--json`, so tokens
+  go through `maskToken` on the way in.
 
 > Login does not need `--url`. Set the a2wave instance URL globally via **`a2wave config set-url`**, or override it per data command with `--url` / `$A2WAVE_URL`.
 
@@ -99,6 +143,9 @@ The a2wave service address is not hardcoded; it is provided by the user. Three s
 | `a2wave config set-url <url>` | **Globally persistent**: written to `~/.a2wave/config.json`, effective across shells |
 | `a2wave config get` | Show current config (token auto-masked to last 4 characters) |
 | `a2wave config unset-url` | Clear the global URL (keeps the token) |
+| `a2wave config add-profile <name> <url>` | Name an instance URL so it can be switched to |
+| `a2wave config use <name>` | Point the default URL at a named profile |
+| `a2wave config list` | List profiles, marking the current one (`--json` supported) |
 
 Example:
 ```bash
@@ -136,6 +183,21 @@ See [docs/agent/cli-oauth.md](../../docs/agent/cli-oauth.md) for details.
 | `a2wave skills update <id\|name> --name "..." --description "..."` | Update name/description |
 | `a2wave skills update <id\|name> --file ./skill.zip` | Full package replacement (.md or .zip) |
 | `a2wave skills delete <id\|name> [--force]` | Delete Skill (irreversible; confirms by default; non-interactive needs `--force`) |
+| `a2wave skills files list <id\|name>` | List the files a Skill ships, as flat `dir/file` paths ready to pass to `files get` |
+| `a2wave skills files get <id\|name> <file> [--full]` | Print one Skill file. Reading a Skill's contents is how you decide whether to attach it. **This route answers with the file body, not a JSON envelope** — the CLI wraps it as `{data:{path,content}}` under `--json`, and refuses a binary body rather than dumping it into a terminal |
+
+### Skill Groups
+
+`--group` and the yaml's `skillGroups:` have always resolved a group by name, but
+nothing listed the valid values — an asymmetry worse than the feature being absent.
+
+| Command | Description |
+|------|------|
+| `a2wave skill-groups list` | List groups. Flags any group holding a member its own owner cannot bind, since binding it to an Agent silently drops those Skills |
+| `a2wave skill-groups get <id\|name>` | Show one group merged with its membership (two routes, one command) |
+| `a2wave skill-groups create --name X [--skill <id\|name> ...]` | Create; each `--skill` is resolved by name |
+| `a2wave skill-groups update <id\|name> [--name ...] [--skill ...] [--clear-skills]` | Update. `skillIds` **replaces** the membership server-side, so emptying it needs the explicit `--clear-skills` — a bare `--skill` with no value cannot express it |
+| `a2wave skill-groups delete <id\|name> [--force]` | Delete the group; member Skills are released, not deleted |
 
 ### Agents
 
@@ -167,7 +229,47 @@ See [docs/agent/cli-oauth.md](../../docs/agent/cli-oauth.md) for details.
 | `a2wave agents import-url <url> [--header "K: V"]` | Import from a remote a2wave instance's export URL |
 | `a2wave agents members list\|add\|update\|remove ...` | Members: `add --user <id\|name> --role viewer\|editor`; owner-only for writes |
 | `a2wave agents artifacts list\|download\|delete ...` | Artifacts: list `?agentId=`; download takes only the basename of the server filename into the current directory (prevents path traversal), needs `--force` if the target exists; delete |
-| `a2wave agents memory stats\|search\|reindex\|consolidate ...` | Memory: via `/api/memories/:agentId/*` (memoryAuthMiddleware) |
+| `a2wave agents memory stats\|search\|reindex\|consolidate ...` | Memory aggregates: via `/api/memories/:agentId/*` (memoryAuthMiddleware). **File- and topic-level access lives under the top-level `memory` command** below |
+
+### Memory
+
+The most agent-native surface the platform has, and the one the CLI covered least
+— four of thirteen endpoints. `agents memory` keeps the aggregate operations
+(stats/search/reindex/consolidate); this command adds the per-file and per-topic
+reads and writes an Agent actually performs.
+
+| Command | Description |
+|------|------|
+| `a2wave memory files list <agent>` | List the Agent's memory files |
+| `a2wave memory files get <agent> <file> [--full]` | Print one file. A nested path is sent verbatim (the route is a `/files/*` wildcard, so encoding the separators would address a file literally named `notes%2Fa.md`) |
+| `a2wave memory files put <agent> <file> --content "..." \| --content-file ./x.md [--append]` | Write or append. **Exactly one** content source — silently ignoring the second is how you write the wrong body and cannot tell |
+| `a2wave memory files delete <agent> <file> [--force]` | Delete one file (irreversible; confirms by default) |
+| `a2wave memory topics list <agent> [--status active\|archived\|all]` | Topic metadata only; bodies are never included |
+| `a2wave memory topics recall <agent> <query> [--full]` | Select and read the single best-matching active topic. **`data: null` is a successful "nothing matched"**, reported as a message rather than an error |
+| `a2wave memory topics remember <agent> --title X --item "..." [--item ...]` | Record an insight into a topic |
+| `a2wave memory topics remember <agent> --replace --topic <id> --content "..."` | Replace a whole topic body |
+
+> `files get` and `topics recall` are **capped at 200 lines** in the human path with
+> an explicit truncation marker; `--full` or `--json` returns everything. A memory
+> file is agent-written and grows without bound, so an uncapped read is a context
+> window hazard — but the `--json` payload is left WHOLE, because silently dropping
+> lines from a machine payload corrupts it with no error.
+
+### Channels
+
+| Command | Description |
+|------|------|
+| `a2wave channels set <agent> <channel> --set k=v ...` | Save one channel's config. `true`/`false`/integers are typed, since every shell flag arrives as a string and zod rejects `"false"` |
+| `a2wave channels set <agent> <channel> --config-file ./feishu.json` | Same, reading the whole config object from JSON |
+| `a2wave channels chat-app <agent>` | Show the published chat page profile (404 when the channel is off) |
+
+> **Configuring is not publishing.** `PATCH /channels/:channel` deliberately does
+> *not* set `publishStatus`, rotate the API key, or restart other channels' sockets —
+> a draft stays a draft until `agents publish`. The config object is **replaced**, so
+> a partial `--set` drops the fields it omits; the CLI says so on every success.
+> Configurable channels are `feishu`, `slack`, `discord`, `chat_app`, `schedule`,
+> `glab`, `gh` — `api` / `a2a` / `oauth` carry no saveable config and are rejected
+> client-side with the valid set named, rather than as a bare 400.
 
 ### Chat
 
@@ -180,6 +282,16 @@ See [docs/agent/cli-oauth.md](../../docs/agent/cli-oauth.md) for details.
 | `a2wave chat send <agent> -m "..." --json` | Emit `{data: {reply, chatId, runId, queued?}}` as one JSON object — note the `data` wrapper, matching every other command (implies `--no-stream`; requires `-m`) |
 | `a2wave chat list <agent>` | List the Agent's chat sessions. Prints **both** ids: the `run_xxx` (for `chat messages`) and the `chat-id` (for `--chat-id`) — they are different, and passing a run id to `--chat-id` silently starts a new conversation instead of resuming |
 | `a2wave chat messages <agent> <runId>` | Print the messages of one session |
+| `a2wave chat send <agent> -m "..." --attach ./a.png --attach ./b.md` | Attach local files to one turn. Two-step: each file is staged at `POST /api/attachments`, and the returned `{token,name,mimeType,size}` refs go on the chat body, which is what consumes them |
+
+> **Attachments.** Capped at **10 per turn**, mirroring `attachmentsInputSchema`'s
+> `.max(10)`, and checked **before any upload** — staging eleven files and then
+> having the send rejected leaves eleven blobs on the server for the whole staging
+> TTL. Uploads are sequential on purpose: the server enforces a size limit and an
+> extension allowlist per file, and a parallel upload would report whichever file
+> failed first while the others were already staged, leaving the caller unable to
+> tell which argument was wrong. `--attach` requires `-m/--message`: an interactive
+> session sends many turns and there is no single one the files belong to.
 
 > Chat is available to **viewer** permission and up (debug access), matching `POST /api/agents/:id/chat`.
 >
@@ -189,12 +301,43 @@ See [docs/agent/cli-oauth.md](../../docs/agent/cli-oauth.md) for details.
 
 ### citty argument pitfalls (enforced by tests)
 
-Two structural rules are checked by [src/__tests__/command-structure.test.ts](./src/__tests__/command-structure.test.ts), because both classes of bug are invisible to unit tests that call a command's `run()` directly:
+Four structural rules are checked by [src/__tests__/command-structure.test.ts](./src/__tests__/command-structure.test.ts), because every one of these bug classes is invisible to unit tests that call a command's `run()` directly — they never exercise citty's parser, router or usage renderer:
 
 | Rule | Why |
 |------|------|
 | A node with `subCommands` must declare **no positional** | citty resolves the first non-flag argument against `subCommands`; a positional on the same node is unreachable and errors with `Unknown command`. |
 | Never declare an arg named `no-<x>` | citty parses `--no-x` as negation of `x`, setting `args.x = false` — it never populates an arg literally named `no-x`, so the flag is silently inert. Declare `x` with `default: true` and read `args.x === false`; the `--no-x` spelling still works and still shows up in `--help`. |
+| **Every node must declare `meta.name`**, equal to its key in the parent's `subCommands` | citty builds the usage line as `` `${parentMeta.name} ` + (cmdMeta.name \|\| process.argv[1]) `` (`citty/dist/index.mjs:353`). With no `meta.name` it falls back to **`process.argv[1]`** — the absolute path of the running script — so the published binary printed `USAGE a2wave /usr/local/lib/node_modules/a2wave/dist/index.cjs list\|get\|...`. Wrong, unrunnable as printed, and ~87 wasted tokens on every `--help` an agent reads. |
+| `meta.name` must be a **single segment**, never a full path | `runMain` resolves the name against the root command when building the prefix, so `name: 'a2wave agents'` renders a doubled `a2wave a2wave agents` **and stops the node routing at all**. |
+
+**`runMain` is not used, on purpose.** It catches every error itself, prints it
+through consola and calls `process.exit(1)` — so the idiomatic
+`runMain(cmd).catch(handleError)` is dead code, and a plain `CliError` reached
+the user as a stack trace with the message printed twice. `src/index.ts` owns
+its own try/catch instead, reproducing citty's `--help` / `--version` branches
+because they live inside the function being replaced. Two traps if you touch it:
+
+- citty's `resolveSubCommand` is **internal** — absent from both the public type
+  surface and the CJS bundle's exports, so importing it typechecks and then
+  throws `is not a function` at runtime. `src/index.ts` walks the tree itself.
+- A wrong command name arrives as citty's own `CLIError`. It must be reported as
+  `validation`, not `internal` — a typo is not a crash in this CLI.
+
+Because unit tests call `handleError` directly, none of this was observable from
+them; `src/__tests__/dispatch.test.ts` runs the real entry point as a subprocess.
+That file strips `TEST` / `VITEST` / `NODE_ENV` from the child environment:
+consola suppresses output when it believes it is under test (std-env computes
+`isTest` from `NODE_ENV === 'test' || !!env.TEST`), and a child inherits both, so
+every help assertion would otherwise compare against `''` and pass for the wrong
+reason.
+
+Scope note on the last two: `resolveSubCommand` passes only the *immediate*
+parent, so a depth-2 usage line reads `agents members list` without the leading
+`a2wave`. That is a citty limitation, not a defect in our tree — widening
+`meta.name` to compensate breaks routing, which is why the rule above exists.
+The property the tests actually guarantee is that **no absolute path ever
+reaches the user**, asserted behaviourally via `renderUsage()` on every node
+against its real parent.
 
 ### Evaluation
 
@@ -358,6 +501,48 @@ Referenced resources support both forms: `provider: name` or `provider: prv_xxx`
 | `a2wave update` | Check for and update the a2wave CLI to the latest published version. Queries the npm default registry unless `$A2WAVE_NPM_REGISTRY` points at a mirror |
 | `a2wave upgrade` | Alias for `a2wave update` |
 
+### `api` — the raw escape hatch
+
+**Prefer a typed command when one exists.** It validates parameters, resolves
+names to IDs, and carries usage guidance that `api` cannot. Reach for `api` only
+for endpoints with no typed command yet — the CLI covers roughly 60 of the
+platform's ~150 routes, and before this existed the alternative was hand-rolled
+`curl` plus digging the token out of `~/.a2wave/config.json`.
+
+```bash
+a2wave api GET /api/settings
+a2wave api GET /api/runs --query status=failed --query limit=5
+a2wave api PATCH /api/agents/agt_x --body '{"name":"renamed"}' --yes
+a2wave api POST /api/skills --body-file ./skill.json --yes
+```
+
+| Property | Behaviour |
+|---|---|
+| **Auth** | Goes through `createClient()`, so it inherits the IDaaS JWT exchange. An independent `fetch` would silently break every OIDC user, whose stored token needs exchanging first |
+| **Path guard** | Must start with `/api/`. Anything containing `://`, or starting `//`, is refused — `api GET https://evil.example/x` would otherwise send the bearer token to that host. Use `--url` to target a different instance |
+| **Writes** | Any method other than GET requires `--yes` (aliased to `--force`). The CLI cannot know what an arbitrary POST does, so it assumes the worst |
+| **Output** | Always JSON, always through `emit()` — so redaction, `--fields` and `--show-secrets` all apply. This matters *more* here than for typed commands: `api` reaches endpoints the redaction denylist has never seen, and that denylist fails open by design |
+
+## Design principle: the primary consumer is an Agent
+
+Iron Rule 6 says the platform builds no convenience UI, so **the CLI and the API
+*are* the surface a user's local Agent drives**. That makes an AI agent — not a
+human at a terminal — this tool's main caller, and three properties follow:
+
+| Property | What it means here |
+|---|---|
+| **Token-frugal** | Output is read into a context window. `--json` is compact; `--fields` projects; anything unbounded gets a cap and says so. |
+| **Machine-parseable** | Every read command can answer in JSON. An agent should never have to scrape a column layout. |
+| **Safe by construction** | The CLI is the last hop before terminal scrollback and CI logs, so it redacts rather than trusting every upstream route to have done it. |
+
+Two rules fall out of this that are easy to get backwards:
+
+- **Human-readable stays the DEFAULT.** Agent-first is not agent-only; a bare
+  invocation still prints the table. JSON is opt-in, so nothing that scrapes
+  today breaks.
+- **Redaction runs BEFORE projection.** See `--fields` below — this ordering is
+  a security property, not a style choice.
+
 ## Machine-readable output (`--json`)
 
 Read-oriented commands accept `--json` and print the **raw API payload** instead of the human-formatted columns, so scripts and CI never have to scrape output:
@@ -369,11 +554,44 @@ a2wave agents list --json | jq -r '.data[] | select(.publishStatus=="published")
 # never mistaken for a total. Raise --limit to widen the window.
 a2wave runs list --status failed --json | jq '.filter.matchedOnPage'
 a2wave chat send my-bot -m "ping" --json | jq -r '.data.reply'
+
+# Project to the fields you need — the single biggest token lever there is.
+a2wave agents list --fields 'data[].id,data[].name'     # >90% smaller than --json
 ```
+
+| Flag | Effect |
+|------|--------|
+| `--json` | Compact single-line JSON. The default JSON layout, because indentation is 9–25% of the bytes (highest on wide short-valued rows, lowest when a long `systemPrompt` dominates) and an agent gains nothing from it |
+| `--json-pretty` | Same payload, indented for human reading. Implies `--json` |
+| `--fields <paths>` | Comma-separated dot paths, `[]` to map over an array (`data[].id,data[].name`). Implies `--json` |
+| `--show-secrets` | Print credentials verbatim instead of `********` |
+
+### Bounded output
+
+Anything that can grow without limit is capped in the **human** path and left
+whole under `--json` — silently dropping entries from a machine payload would
+corrupt it with no error, whereas a terminal or a context window genuinely
+wants the cap. Every cap names the way to get everything:
+
+| Command | Cap | Escape |
+|---|---|---|
+| `runs get` | 200 log entries per step, **tail kept** (a run's logs are read to find out how it ended, and the failure is at the bottom) | `--full`, `--max-log-lines N`, or `a2wave runs logs <id>` |
+| `eval tasks get` / `eval run --wait` | Turn transcripts clipped at 200 chars; turn *errors* never clipped | `--verbose` |
+| `memory files get` / `memory topics recall` / `skills files get` | 200 lines, **head kept** (a memory or Skill file is read top-down for what it says, unlike a run log read bottom-up for how it failed) | `--full` or `--json` |
+| list commands | `--limit` / `--page`, clamped to the API's 1–100 window | `--limit 100` |
+
+`--limit` on the six resource lists (`agents`/`skills`/`mcp`/`scm`/`kb`/
+`providers`) defaults to the **100** they always fetched, not the 20 that
+`runs list` uses: lowering it would silently truncate output for anyone already
+relying on a bare `agents list` showing everything. The flag adds control
+without changing what an existing call returns.
 
 Rules:
 
 - The flag comes from the shared `jsonArg` fragment in [src/lib/output.ts](./src/lib/output.ts); commands call `if (emit(args, result)) return` before their own formatting, so the two modes can never both print.
+- **`--fields` projects AFTER redaction, never before** ([src/lib/fields.ts](./src/lib/fields.ts)). `redactSecrets` decides what is secret partly from *sibling* keys — an agent env var is `{value, sensitive: true}`, and the `sensitive` flag is the only marker that `value` needs masking. Projecting first would strip that sibling, so `--fields data.env.FOO.value` would hand the redactor a bare `{value: 'sk-live'}` and print the secret in clear. Redacting first is safe both ways: projection only removes keys, and `********` survives it. An invariant test in `src/lib/__tests__/fields.test.ts` pins this.
+- A `--fields` path that matches nothing is **omitted, not fatal** — an agent composing paths from a schema will legitimately name a field that is optional and absent on this row. The misses come back under `_meta.unmatchedFields` so it can self-correct without another round-trip.
+- **No `--jq`.** It would need either a `jq` binary or a vendored JS implementation; the published package ships only `citty` + `yaml`, and an agent that wants real jq still has `| jq` in its own shell.
 - **Credentials are redacted by default.** The API returns secrets in plaintext to an owner/editor (the Web UI gates that behind a "click the eye" affordance), but CLI output lands in terminal scrollback, shell history and CI logs. Pass **`--show-secrets`** to print them verbatim; only do so when piping to a secure consumer. Four rules, because secrets arrive in four shapes:
 
   | Rule | Covers |
@@ -383,7 +601,51 @@ Rules:
   | Key is a **secret container** (`env`, `headers`) | MCP servers store credentials in free-form maps the operator names, so **every value** inside is masked regardless of name; the keys stay visible |
   | Key holds a **URL** (`url`, `repoUrl`, `endpoint`, `baseUrl`) | Only the credential-bearing *parts* are masked — userinfo, query, fragment, and opaque token-like path segments. Scheme, host and ordinary path survive, so links stay usable and the server's `********@host/path` sentinel still round-trips through `scm update --config-file` |
 - `--json` prints exactly **one** JSON document to stdout. `a2wave chat --json` therefore implies `--no-stream` (streamed tokens would interleave) and requires `-m/--message` — an interactive session has no single payload.
-- Errors still go to stderr as plain text with a non-zero exit code; `--json` shapes success output only.
+- Errors always go to **stderr**, so a caller piping stdout into a parser never has the payload and the failure interleaved. Under a JSON flag they are an envelope; otherwise plain text. Either way the exit code is non-zero. See below.
+
+## Error contract
+
+An agent recovers from a failure by branching on it, and matching prose is a
+brittle way to do that — `"Session expired"` breaks the moment someone rewords
+it. So errors carry a stable `type`/`subtype` and, where one exists, a `hint`
+that is a **runnable next step** rather than advice.
+
+Under `--json` / `--json-pretty` / `--fields`, stderr gets one compact object:
+
+```json
+{"ok":false,"error":{"type":"auth","subtype":"expired","message":"Session expired or invalid.","hint":"a2wave login"}}
+```
+
+Absent fields are **omitted, not null** — `error.subtype` should read as
+`undefined`, not something to special-case. Plain-text mode prints the message,
+then `Hint: <hint>` on its own line when there is one.
+
+| `type` | Means |
+|---|---|
+| `auth` | The caller's own credentials. HTTP 401 is intercepted in `client.ts` before it can become an `ApiError`, so this never gets confused with "the request was rejected" |
+| `permission` | Authenticated, but not allowed (403) |
+| `not_found` (404) · `conflict` (409) · `rate_limit` (429) | As named |
+| `validation` | Bad input, caught client-side or as a 4xx |
+| `server` | 5xx |
+| `network` | Could not reach the instance at all |
+| `confirmation` | Needs `--force` / `--yes`. The most likely error an agent hits, since it never has a TTY |
+| `cli` | Any other deliberate CLI failure |
+| `internal` | A bug in this CLI |
+
+`ApiError` sets `subtype` to the numeric status, and **clips the server body at
+2000 chars** — a 5xx can answer with a whole HTML error page, and untruncated
+that lands in a CI log or a context window.
+
+`internal` deserves its own note: an unexpected `TypeError` used to be
+re-thrown, surfacing as a full Node stack dump. It is now reported in the same
+shape as everything else, with the stack behind `A2WAVE_DEBUG=1` for whoever is
+actually debugging it.
+
+**Structured fields are additive.** `new CliError('...')` still works, so the
+~60 existing throw sites needed no edit; enrich them as each is shown to matter.
+When you do, keep the human sentence self-sufficient — the structured fields are
+for the machine, and dropping the readable instruction to avoid repeating
+yourself makes plain-text mode strictly worse.
 
 ## Numeric flag parsing
 
@@ -421,12 +683,47 @@ Ambiguous names **error out and list the candidates** rather than silently takin
 ```
 ~/.a2wave/config.json
 {
-  "url": "https://your-a2wave.com",
-  "token": "eyJ..."
+  "url": "https://your-a2wave.com",        // the default instance
+  "token": "eyJ...",                       // its credential (legacy shape, still read)
+  "credentials": {                         // credentials keyed by instance URL
+    "https://your-a2wave.com": { "token": "eyJ..." },
+    "https://staging.example":  { "token": "eyJ..." }
+  },
+  "profiles": { "staging": { "url": "https://staging.example" } },
+  "currentProfile": "staging"
 }
 ```
 
 `a2wave login` writes it automatically and `a2wave logout` clears it. All commands read this file at startup and prompt for re-login when it is missing or invalid.
+
+### Credentials are keyed by URL
+
+**The bug this fixes:** `requireToken()` took no URL argument, and `createClient`
+called it alongside `resolveUrl(opts.url)` with nothing linking the two. So
+`--url https://other` paired that host with the *stored* instance's token —
+leaking it there, then failing as a 401 that blamed the user's login rather than
+naming the cause. `client.ts` now resolves the URL **first** and asks for the
+credential belonging to it.
+
+Resolution order in `resolveCredential(url)`:
+
+1. `credentials[url]` — the per-instance entry.
+2. the legacy top-level `token`, **but only when `config.url` is that same URL**.
+   That conditional is the entire fix; the fallback used to be unconditional.
+3. otherwise throw `{type:'auth', subtype:'no_credential_for_url'}` with a
+   `a2wave login --url <url>` hint. Never fall through to "some token we happen
+   to have" — sending the wrong instance's credential is worse than failing.
+
+**Migration is implicit and lazy: no version field, no rewrite-on-read.** An
+existing flat `{url, token}` keeps working untouched, and because nothing is
+rewritten on read, downgrading to an older CLI still works. `login` writes both
+the legacy pair *and* the per-URL entry, so logging into a second deployment no
+longer costs you the first one's token.
+
+Profiles (`config add-profile` / `use` / `list`) are **named aliases over this**,
+not a second mechanism. An agent almost never wants "a profile" — it wants "this
+URL with the right token", which `--url` already gives it. Profiles are for a
+human switching between deployments.
 
 ## Key References
 

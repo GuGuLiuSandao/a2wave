@@ -1,7 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  ScmWorkloadAdmissionError,
-  ScmWorkloadLeaseConflictError,
   activateScmWorkload,
   findDurableAgentScmWorkload,
   findDurableScmSourceWorkload,
@@ -9,6 +7,8 @@ import {
   releaseReservedScmWorkload,
   releaseScmWorkload,
   retryScmWorkloadReleaseUntilSuccess,
+  ScmWorkloadAdmissionError,
+  ScmWorkloadLeaseConflictError,
   withScmWorkloadAdmission,
 } from '../scm-workload-lifecycle.js'
 

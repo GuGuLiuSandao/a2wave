@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  WorkspaceCleanupExhaustedError,
   cleanupWorkspaceOrHandOff,
   retryWorkspaceCleanup,
+  WorkspaceCleanupExhaustedError,
 } from '../workspace-cleanup-retry.js'
 import { WorkspaceRemovalHandedOffError } from '../workspace-removal-outcome.js'
 

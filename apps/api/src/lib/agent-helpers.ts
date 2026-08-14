@@ -1,6 +1,5 @@
 import { existsSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
-import { PROVIDER_CHAIN_MAX, providerKindSchema } from '@a2wave/shared'
 import type {
   AuthHeaderStyle,
   GitConfig,
@@ -12,6 +11,7 @@ import type {
   ProviderMcpDelivery,
   WorktreeCallParams,
 } from '@a2wave/shared'
+import { PROVIDER_CHAIN_MAX, providerKindSchema } from '@a2wave/shared'
 import { and, eq, inArray, isNull, ne, or } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import {
@@ -40,19 +40,19 @@ import {
   UnusableProviderChainError,
 } from './errors.js'
 import {
-  WORKTREE_NAME_REGEX,
-  WorktreeBranchLockedError,
-  WorktreeDirtyError,
   isPerAgentWorkspaceName,
   perAgentWorkspaceName,
   readWorkspaceState,
+  WORKTREE_NAME_REGEX,
+  WorktreeBranchLockedError,
+  WorktreeDirtyError,
 } from './git-workspace.js'
-import { INTERNAL_ADMIN_TOKEN_ENV, getInternalAdminToken } from './internal-admin-auth.js'
+import { getInternalAdminToken, INTERNAL_ADMIN_TOKEN_ENV } from './internal-admin-auth.js'
 import { withKeyedLock } from './keyed-mutex.js'
 import { logger } from './logger.js'
 import { canNonAdminUseMcp, introducesStdioExecution } from './mcp-stdio.js'
 import { cleanupLegacyRuntimeGroupConfig } from './runtime-group-config.js'
-import { type CreateWorkspaceResult, type ScmSource, createScmSource } from './scm-source.js'
+import { type CreateWorkspaceResult, createScmSource, type ScmSource } from './scm-source.js'
 import {
   findPendingWorkspaceRemoval,
   removeSourceWorkspaceGuarded,

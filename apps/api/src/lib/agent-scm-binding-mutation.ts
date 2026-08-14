@@ -1,7 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { agents, scmSources } from '../db/schema.js'
-import { type TransactionHandle, runExclusive } from '../db/transaction.js'
+import { runExclusive, type TransactionHandle } from '../db/transaction.js'
 import { withScmPathMutation } from './scm-path-plan.js'
 import { type ActiveAgentScmWorkload, findActiveAgentScmWorkload } from './scm-workload-guard.js'
 import { withAgentScmWorkloadLock } from './scm-workload-lock.js'

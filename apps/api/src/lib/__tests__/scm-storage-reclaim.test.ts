@@ -27,7 +27,7 @@ vi.mock('../logger.js', () => ({
 }))
 
 import { env as envMock } from '../../env.js'
-import { RECLAIM_ISOLATION_DIR, isolateManagedScmStorage } from '../scm-storage-reclaim.js'
+import { isolateManagedScmStorage, RECLAIM_ISOLATION_DIR } from '../scm-storage-reclaim.js'
 
 /**
  * Deleting a managed source must reclaim the directory a2wave allocated for it.

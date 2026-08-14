@@ -2,13 +2,13 @@ import { A2A_VERSION_HEADER, Extensions, HTTP_EXTENSION_HEADER } from '@a2a-js/s
 import { isLegacyJsonRpcMethod, isV1JsonRpcMethod } from '@a2a-js/sdk/compat/v0_3'
 import { LegacyJsonRpcTransportHandler } from '@a2a-js/sdk/compat/v0_3/server'
 import { RequestMalformedError } from '@a2a-js/sdk/errors'
+import type { TaskStore, User } from '@a2a-js/sdk/server'
 import {
   DefaultRequestHandler,
   JsonRpcTransportHandler,
   ServerCallContext,
   validateVersion,
 } from '@a2a-js/sdk/server'
-import type { TaskStore, User } from '@a2a-js/sdk/server'
 import type { Context } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import type { agents } from '../db/schema.js'
@@ -26,8 +26,8 @@ import {
 } from '../middleware/gateway-auth.js'
 import { buildAgentCard } from './agent-card.js'
 import { createScopedEventBusManager } from './event-bus-manager.js'
-import { A2waveAgentExecutor } from './executor.js'
 import type { A2waveExecutorConfig, CancelFn, ExecuteFn } from './executor.js'
+import { A2waveAgentExecutor } from './executor.js'
 
 type AgentRow = typeof agents.$inferSelect
 

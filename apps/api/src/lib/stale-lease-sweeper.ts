@@ -1,11 +1,11 @@
-import { evaluationQueueDb } from '../engine/evaluation-queue-db.js'
 import { scheduleNextEvaluation } from '../engine/evaluation-queue.js'
+import { evaluationQueueDb } from '../engine/evaluation-queue-db.js'
 import {
   completeExecutionLease,
   listActiveExecutionLeases,
 } from '../engine/execution-lease-registry.js'
-import { taskQueueDb } from '../engine/task-queue-db.js'
 import { scheduleNext, sweepStaleLeases } from '../engine/task-queue.js'
+import { taskQueueDb } from '../engine/task-queue-db.js'
 import { runEvaluationTask } from '../routes/evaluation.js'
 import { executeChatRun } from './execute-chat-run.js'
 import { pruneDeadInstanceHeartbeats } from './instance-heartbeat.js'
@@ -14,8 +14,8 @@ import {
   failScmWorkloadsOfDeadInstances,
   sweepOrphanedScmWorkloadLeases,
 } from './scm-lease-sweeper.js'
-import { reconcileAbandonedWorkspaceRemovals } from './scm-workspace-removal-reconciler.js'
 import { retryPendingWorkspaceRemovalReleases } from './scm-workspace-removal.js'
+import { reconcileAbandonedWorkspaceRemovals } from './scm-workspace-removal-reconciler.js'
 
 const DEFAULT_SWEEP_INTERVAL_MS = 60_000
 

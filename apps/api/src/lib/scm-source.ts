@@ -8,14 +8,14 @@ import { join } from 'node:path'
 import type { GitConfig } from '@a2wave/shared'
 import {
   type CleanupOptions,
-  type RemoveGitWorkspaceOptions,
-  type WorkspaceInfo,
-  type WorkspaceState,
   cleanupStaleWorkspaces,
   createGitWorkspace,
   defaultWorkspacesPath,
   listGitWorkspaces,
+  type RemoveGitWorkspaceOptions,
   removeGitWorkspace,
+  type WorkspaceInfo,
+  type WorkspaceState,
   writeWorkspaceState,
 } from './git-workspace.js'
 import { assertStoredScmWorkspacesRoot } from './scm-workspace-safety.js'

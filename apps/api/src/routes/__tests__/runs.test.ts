@@ -1,6 +1,6 @@
 import { type SQL, sql } from 'drizzle-orm'
 import { Hono } from 'hono'
-import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
 import type { runs } from '../../db/schema.js'
 
 type Json = Record<string, unknown>

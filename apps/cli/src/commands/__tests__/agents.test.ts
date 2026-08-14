@@ -99,9 +99,46 @@ describe('agentsCommand', () => {
 
       expect(process.exitCode).toBe(1)
     })
+
+    it('emits the raw payload with --json', async () => {
+      mockResolveAgentId.mockResolvedValueOnce('agt_1')
+      mockGet.mockResolvedValueOnce({ data: sampleResult })
+
+      await getSubCommand('diagnose').run({ args: { id: 'agt_1', json: true } })
+
+      expect(JSON.parse(String(consoleSpy.mock.calls.at(-1)?.[0]))).toEqual({ data: sampleResult })
+    })
+
+    it('still sets process.exitCode=1 under --json', async () => {
+      // diagnose doubles as a CI gate. The exit code has to be set BEFORE the
+      // early --json return, or piping to jq silently turns a red check green —
+      // the same trap `runs rerun --wait` and `eval run --wait` document.
+      mockResolveAgentId.mockResolvedValueOnce('agt_2')
+      mockGet.mockResolvedValueOnce({ data: { ...sampleResult, ok: false } })
+
+      await getSubCommand('diagnose').run({ args: { id: 'agt_2', json: true } })
+
+      expect(process.exitCode).toBe(1)
+    })
   })
 
   describe('list', () => {
+    it('defaults to the historical 100-row window', async () => {
+      // The default deliberately stays 100 rather than dropping to the
+      // 20 that `runs list` uses: lowering it would silently truncate output
+      // for anyone already relying on `agents list` showing everything.
+      // `--limit` adds control without changing what a bare call returns.
+      mockGet.mockResolvedValueOnce({ data: [] })
+      await getSubCommand('list').run({ args: {} })
+      expect(mockGet).toHaveBeenCalledWith('/api/agents?page=1&pageSize=100')
+    })
+
+    it('honours --limit and --page', async () => {
+      mockGet.mockResolvedValueOnce({ data: [] })
+      await getSubCommand('list').run({ args: { limit: '5', page: '2' } })
+      expect(mockGet).toHaveBeenCalledWith('/api/agents?page=2&pageSize=5')
+    })
+
     it('prints agents with id, status, name, and description', async () => {
       mockGet.mockResolvedValueOnce({
         data: [
@@ -112,7 +149,7 @@ describe('agentsCommand', () => {
 
       await getSubCommand('list').run({ args: {} })
 
-      expect(mockGet).toHaveBeenCalledWith('/api/agents?pageSize=100')
+      expect(mockGet).toHaveBeenCalledWith('/api/agents?page=1&pageSize=100')
       expect(consoleSpy).toHaveBeenCalledWith('agt_1  [published]  Bot A  A bot')
       expect(consoleSpy).toHaveBeenCalledWith('agt_2  [draft]  Bot B')
     })
@@ -592,6 +629,16 @@ describe('agentsCommand', () => {
       expect(consoleSpy).toHaveBeenCalledWith('  failed: 1')
       expect(consoleSpy).toHaveBeenCalledWith('  feishu: 7')
     })
+
+    it('emits the raw payload with --json', async () => {
+      mockResolveAgentId.mockResolvedValueOnce('agt_1')
+      const payload = { total: 10, byStatus: { completed: 9 }, channelBreakdown: [] }
+      mockGet.mockResolvedValueOnce(payload)
+
+      await getSubCommand('stats').run({ args: { id: 'agt_1', json: true } })
+
+      expect(JSON.parse(String(consoleSpy.mock.calls.at(-1)?.[0]))).toEqual(payload)
+    })
   })
 
   describe('artifacts', () => {
@@ -674,7 +721,9 @@ describe('agentsCommand', () => {
 
     it('deletes an artifact', async () => {
       mockDel.mockResolvedValueOnce({})
-      await getGroupSub('artifacts', 'delete').run({ args: { id: 'art_1' } })
+      // `--force` is now required: artifact delete is high-risk-write, and
+      // this suite runs without a TTY exactly as an agent does.
+      await getGroupSub('artifacts', 'delete').run({ args: { id: 'art_1', force: true } })
       expect(mockDel).toHaveBeenCalledWith('/api/artifacts/art_1')
     })
   })
@@ -685,9 +734,12 @@ describe('agentsCommand', () => {
       mockGet.mockResolvedValueOnce({ data: { total: 42, byKind: { fact: 40 } } })
       await getGroupSub('memory', 'stats').run({ args: { agent: 'agt_1' } })
       expect(mockGet).toHaveBeenCalledWith('/api/memories/agt_1/stats')
-      expect(consoleSpy).toHaveBeenCalledWith(
-        JSON.stringify({ total: 42, byKind: { fact: 40 } }, null, 2),
-      )
+      // Asserted on the parsed value, not the exact string: the JSON layout is
+      // emit()'s concern (compact by default, indented under --json-pretty),
+      // and pinning it here would fail the whole suite on a formatting change
+      // that is not this command's behaviour.
+      const printed = JSON.parse(String(consoleSpy.mock.calls.at(-1)?.[0]))
+      expect(printed).toEqual({ total: 42, byKind: { fact: 40 } })
     })
 
     it('search uses q query param', async () => {
@@ -695,6 +747,38 @@ describe('agentsCommand', () => {
       mockGet.mockResolvedValueOnce({ data: { results: [{ text: 'x' }] } })
       await getGroupSub('memory', 'search').run({ args: { agent: 'agt_1', query: 'hello world' } })
       expect(mockGet).toHaveBeenCalledWith('/api/memories/agt_1/search?q=hello%20world')
+    })
+
+    // Memory content is free-form text an Agent wrote about its own work, so
+    // unlike the scm probes there is no server-side allowlist bounding it — a
+    // recalled note can contain anything the Agent once saw, credentials
+    // included. This printed raw, outside emit(), with no redaction and no way
+    // to opt into machine-readable output.
+    it('search redacts credential-bearing fields', async () => {
+      mockResolveAgentId.mockResolvedValueOnce('agt_1')
+      mockGet.mockResolvedValueOnce({
+        data: { results: [{ text: 'deploy note', apiKey: 'sk-live-secret' }] },
+      })
+
+      await getGroupSub('memory', 'search').run({
+        args: { agent: 'agt_1', query: 'deploy', json: true },
+      })
+
+      const out = consoleSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
+      expect(out).not.toContain('sk-live-secret')
+      expect(out).toContain('********')
+      expect(out).toContain('deploy note')
+    })
+
+    it('stats redacts credential-bearing fields', async () => {
+      mockResolveAgentId.mockResolvedValueOnce('agt_1')
+      mockGet.mockResolvedValueOnce({ data: { total: 1, providerApiKey: 'sk-live-secret' } })
+
+      await getGroupSub('memory', 'stats').run({ args: { agent: 'agt_1', json: true } })
+
+      const out = consoleSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
+      expect(out).not.toContain('sk-live-secret')
+      expect(out).toContain('********')
     })
 
     it('reindex posts', async () => {

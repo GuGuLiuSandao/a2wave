@@ -1,22 +1,21 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
-import { stat, utimes } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { GitConfig } from '@a2wave/shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  WORKSPACE_STATE_FILE,
-  WorktreeBranchLockedError,
-  WorktreeDirtyError,
   cleanupStaleWorkspaces,
   createGitWorkspace,
   defaultWorkspacesPath,
   listGitWorkspaces,
   readWorkspaceState,
   removeGitWorkspace,
+  WORKSPACE_STATE_FILE,
+  WorktreeBranchLockedError,
+  WorktreeDirtyError,
   writeWorkspaceState,
 } from '../git-workspace.js'
 import { logger } from '../logger.js'

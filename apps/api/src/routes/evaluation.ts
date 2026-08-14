@@ -9,11 +9,11 @@ import { join } from 'node:path'
  * reached by guessing the path.
  */
 import {
-  REVIEWABLE_RESULT_STATUSES,
-  type RunChannelContext,
   createEvaluationCaseInput,
   createEvaluationSetInput,
   createEvaluationTaskInput,
+  REVIEWABLE_RESULT_STATUSES,
+  type RunChannelContext,
   reviewEvaluationResultInput,
   updateEvaluationCaseInput,
   updateEvaluationSetInput,
@@ -32,8 +32,8 @@ import {
   users,
 } from '../db/schema.js'
 import { runExclusive } from '../db/transaction.js'
-import { evaluationQueueDb } from '../engine/evaluation-queue-db.js'
 import { EVALUATION_MAX_QUEUE_LENGTH, scheduleNextEvaluation } from '../engine/evaluation-queue.js'
+import { evaluationQueueDb } from '../engine/evaluation-queue-db.js'
 import { requireAgentRead, requireAgentWrite } from '../lib/agent-access.js'
 import { buildAgentConfig, resolveWorkDir } from '../lib/agent-helpers.js'
 import { logAudit, logBackgroundAudit } from '../lib/audit.js'

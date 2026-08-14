@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  INSTANCE_DEAD_AFTER_MS,
-  INSTANCE_HEARTBEAT_INTERVAL_MS,
-  INSTANCE_SELF_FENCE_AFTER_MS,
-  type InstanceLivenessMap,
   beatInstanceHeartbeat,
   canJudgePeerLiveness,
   deleteInstanceHeartbeat,
   hasLostHeartbeatOwnership,
+  INSTANCE_DEAD_AFTER_MS,
+  INSTANCE_HEARTBEAT_INTERVAL_MS,
+  INSTANCE_SELF_FENCE_AFTER_MS,
+  type InstanceLivenessMap,
   isInstanceOwnerDead,
   loadInstanceLiveness,
   pruneDeadInstanceHeartbeats,

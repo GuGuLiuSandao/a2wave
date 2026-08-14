@@ -5,10 +5,10 @@ import { agents, chatMessages, runSteps, runs, scmSources } from '../db/schema.j
 import { withTransaction } from '../db/transaction.js'
 import { completeExecutionLease } from '../engine/execution-lease-registry.js'
 import { buildTaskId } from '../engine/task-id.js'
-import { taskQueueDb } from '../engine/task-queue-db.js'
 import { scheduleNext } from '../engine/task-queue.js'
+import { taskQueueDb } from '../engine/task-queue-db.js'
 import type { WorkerTaskPayload } from '../worker/index.js'
-import { WorktreeOccupiedError, buildAgentConfig, resolveWorkDir } from './agent-helpers.js'
+import { buildAgentConfig, resolveWorkDir, WorktreeOccupiedError } from './agent-helpers.js'
 import {
   type AttachmentSource,
   cleanupMaterializedRoot,

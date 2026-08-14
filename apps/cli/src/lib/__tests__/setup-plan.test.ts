@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  DEFAULT_PORT,
   buildComposeFile,
   buildEnvFile,
+  DEFAULT_PORT,
   generateAuthSecret,
   generatePostgresPassword,
   generateProjectName,

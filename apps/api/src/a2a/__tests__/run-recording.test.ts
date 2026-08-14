@@ -173,9 +173,8 @@ import { tryAcquireSlot } from '../../engine/task-queue.js'
 import { executeWithRetry } from '../../lib/execute-with-retry.js'
 import { buildGatewayChannel } from '../../lib/run-channel.js'
 import { finishRunError, finishRunSuccess } from '../../lib/run-lifecycle.js'
-import { createRecordedA2ACancelFn, createRecordedA2AExecuteFn } from '../run-recording.js'
-
 import { asyncQuery } from '../../test/async-query.js'
+import { createRecordedA2ACancelFn, createRecordedA2AExecuteFn } from '../run-recording.js'
 
 const mockDb = db as unknown as {
   insert: ReturnType<typeof vi.fn>

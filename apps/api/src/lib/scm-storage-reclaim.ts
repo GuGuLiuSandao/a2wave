@@ -1,14 +1,14 @@
 import type { Stats } from 'node:fs'
-import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { env } from '../env.js'
 import { logger } from './logger.js'
 import {
-  SCM_RECLAIM_DIR,
-  SCM_RECLAIM_MARKER,
   defaultScmLocalPath,
   defaultScmWorkspacesPath,
+  SCM_RECLAIM_DIR,
+  SCM_RECLAIM_MARKER,
   scmReclaimRoot,
   scmSourceIdSuffix,
 } from './scm-storage.js'

@@ -1,8 +1,16 @@
 import { defineCommand } from 'citty'
 import { createClient, urlArg } from '../client.js'
 import { CliError } from '../errors.js'
-import { confirmDestructive, parseIntFlag, readJsonFile } from '../lib/args.js'
-import { emit, jsonArg } from '../lib/output.js'
+import {
+  confirmDestructive,
+  forceArgs,
+  parseIntFlag,
+  readJsonFile,
+  requireConfirmation,
+  resolveForceFlag,
+} from '../lib/args.js'
+import { emit, jsonArg, redactSecrets } from '../lib/output.js'
+import { pageArgs, pageQuery } from '../lib/paginate.js'
 
 interface Workspace {
   name: string
@@ -117,14 +125,16 @@ const createArgs = {
 }
 
 export const scmCommand = defineCommand({
-  meta: { description: 'Manage SCM sources' },
+  meta: { name: 'scm', description: 'Manage SCM sources' },
   subCommands: {
     list: defineCommand({
-      meta: { description: 'List all SCM sources' },
-      args: { ...jsonArg, ...urlArg },
+      meta: { name: 'list', description: 'List all SCM sources', agentMeta: { risk: 'read' } },
+      args: { ...jsonArg, ...pageArgs, ...urlArg },
       run: async ({ args }) => {
         const client = createClient({ url: args.url as string | undefined })
-        const result = await client.get<{ data: ScmSource[] }>('/api/scm-sources?pageSize=100')
+        const result = await client.get<{ data: ScmSource[] }>(
+          `/api/scm-sources?${pageQuery(args, 100)}`,
+        )
         if (emit(args, result)) return
         if (result.data.length === 0) {
           console.log('No SCM sources')
@@ -140,7 +150,11 @@ export const scmCommand = defineCommand({
     }),
 
     get: defineCommand({
-      meta: { description: 'Show SCM source details (ID or name)' },
+      meta: {
+        name: 'get',
+        description: 'Show SCM source details (ID or name)',
+        agentMeta: { risk: 'read' },
+      },
       args: {
         id: { type: 'positional', description: 'SCM source ID or name', required: true },
         ...jsonArg,
@@ -166,7 +180,11 @@ export const scmCommand = defineCommand({
     }),
 
     create: defineCommand({
-      meta: { description: 'Create an SCM source (--type git | p4)' },
+      meta: {
+        name: 'create',
+        description: 'Create an SCM source (--type git | p4)',
+        agentMeta: { risk: 'write' },
+      },
       args: { ...createArgs, ...urlArg },
       run: async ({ args }) => {
         const client = createClient({ url: args.url as string | undefined })
@@ -177,7 +195,11 @@ export const scmCommand = defineCommand({
     }),
 
     update: defineCommand({
-      meta: { description: 'Update an SCM source (excludes type; ID or name)' },
+      meta: {
+        name: 'update',
+        description: 'Update an SCM source (excludes type; ID or name)',
+        agentMeta: { risk: 'write' },
+      },
       args: {
         id: { type: 'positional', description: 'SCM source ID or name', required: true },
         name: { type: 'string', description: 'New name' },
@@ -213,21 +235,36 @@ export const scmCommand = defineCommand({
     }),
 
     delete: defineCommand({
-      meta: { description: 'Delete an SCM source (409 if referenced by an agent)' },
+      meta: {
+        name: 'delete',
+        description: 'Delete an SCM source (409 if referenced by an agent)',
+        agentMeta: { risk: 'high-risk-write' },
+      },
       args: {
         id: { type: 'positional', description: 'SCM source ID or name', required: true },
+        ...forceArgs,
         ...urlArg,
       },
       run: async ({ args }) => {
         const client = createClient({ url: args.url as string | undefined })
+        // Resolve first so the confirmation names the ID actually being deleted.
         const id = await client.resolveScmSourceId(args.id as string)
+        await requireConfirmation(
+          'high-risk-write',
+          `This will permanently delete SCM source ${id} (${args.id}). This action is irreversible.`,
+          resolveForceFlag(args),
+        )
         await client.del(`/api/scm-sources/${id}`)
         console.log('SCM source deleted ✓')
       },
     }),
 
     sync: defineCommand({
-      meta: { description: 'Trigger a background sync (async, 202)' },
+      meta: {
+        name: 'sync',
+        description: 'Trigger a background sync (async, 202)',
+        agentMeta: { risk: 'write' },
+      },
       args: {
         id: { type: 'positional', description: 'SCM source ID or name', required: true },
         ...urlArg,
@@ -241,9 +278,14 @@ export const scmCommand = defineCommand({
     }),
 
     check: defineCommand({
-      meta: { description: 'Check SCM source connectivity' },
+      meta: {
+        name: 'check',
+        description: 'Check SCM source connectivity',
+        agentMeta: { risk: 'read' },
+      },
       args: {
         id: { type: 'positional', description: 'SCM source ID or name', required: true },
+        ...jsonArg,
         ...urlArg,
       },
       run: async ({ args }) => {
@@ -253,29 +295,40 @@ export const scmCommand = defineCommand({
           `/api/scm-sources/${id}/check`,
           {},
         )
-        console.log(JSON.stringify(data, null, 2))
+        if (emit(args, data)) return
+        console.log(JSON.stringify(redactSecrets(data), null, 2))
       },
     }),
 
     status: defineCommand({
-      meta: { description: 'Show sync and CodeGraph status snapshot' },
+      meta: {
+        name: 'status',
+        description: 'Show sync and CodeGraph status snapshot',
+        agentMeta: { risk: 'read' },
+      },
       args: {
         id: { type: 'positional', description: 'SCM source ID or name', required: true },
+        ...jsonArg,
         ...urlArg,
       },
       run: async ({ args }) => {
         const client = createClient({ url: args.url as string | undefined })
         const id = await client.resolveScmSourceId(args.id as string)
         const { data } = await client.get<{ data: unknown }>(`/api/scm-sources/${id}/status`)
-        console.log(JSON.stringify(data, null, 2))
+        if (emit(args, data)) return
+        console.log(JSON.stringify(redactSecrets(data), null, 2))
       },
     }),
 
     workspaces: defineCommand({
-      meta: { description: 'Manage the worktrees of an SCM source' },
+      meta: { name: 'workspaces', description: 'Manage the worktrees of an SCM source' },
       subCommands: {
         list: defineCommand({
-          meta: { description: 'List worktrees (with occupied status)' },
+          meta: {
+            name: 'list',
+            description: 'List worktrees (with occupied status)',
+            agentMeta: { risk: 'read' },
+          },
           args: {
             id: { type: 'positional', description: 'SCM source ID or name', required: true },
             ...jsonArg,
@@ -302,7 +355,11 @@ export const scmCommand = defineCommand({
         }),
 
         remove: defineCommand({
-          meta: { description: 'Delete a worktree (409 when occupied by a run)' },
+          meta: {
+            name: 'remove',
+            description: 'Delete a worktree (409 when occupied by a run)',
+            agentMeta: { risk: 'high-risk-write' },
+          },
           args: {
             id: { type: 'positional', description: 'SCM source ID or name', required: true },
             name: { type: 'positional', description: 'Worktree name', required: true },
@@ -326,10 +383,14 @@ export const scmCommand = defineCommand({
     }),
 
     codegraph: defineCommand({
-      meta: { description: 'CodeGraph index maintenance' },
+      meta: { name: 'codegraph', description: 'CodeGraph index maintenance' },
       subCommands: {
         reindex: defineCommand({
-          meta: { description: 'Rebuild the CodeGraph index (409 while the checkout is busy)' },
+          meta: {
+            name: 'reindex',
+            agentMeta: { risk: 'write' },
+            description: 'Rebuild the CodeGraph index (409 while the checkout is busy)',
+          },
           args: {
             id: { type: 'positional', description: 'SCM source ID or name', required: true },
             ...jsonArg,

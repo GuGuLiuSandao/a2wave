@@ -1,4 +1,3 @@
-import { api } from '@/lib/api'
 import type {
   CreateScmSourceInput,
   ScmSource,
@@ -7,6 +6,7 @@ import type {
   UpdateScmSourceInput,
 } from '@a2wave/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { api } from '@/lib/api'
 
 const SCM_SOURCES_KEY = ['scm-sources'] as const
 

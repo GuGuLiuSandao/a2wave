@@ -1,8 +1,8 @@
-import i18n from '@/i18n'
-import { cn } from '@/lib/utils'
 import { Modal } from 'antd'
 import { X } from 'lucide-react'
 import type { ReactNode } from 'react'
+import i18n from '@/i18n'
+import { cn } from '@/lib/utils'
 
 interface DialogProps {
   open: boolean
@@ -132,4 +132,4 @@ function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivEleme
   return <div className={cn('mt-5 flex justify-end gap-2', className)} {...props} />
 }
 
-export { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter }
+export { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle }

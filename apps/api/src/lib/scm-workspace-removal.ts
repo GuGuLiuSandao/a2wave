@@ -14,7 +14,7 @@ import {
   type ScmWorkloadIdentity,
   scmWorkloadLeaseId,
 } from './scm-workload-lifecycle.js'
-import { WorkspaceCleanupExhaustedError, retryWorkspaceCleanup } from './workspace-cleanup-retry.js'
+import { retryWorkspaceCleanup, WorkspaceCleanupExhaustedError } from './workspace-cleanup-retry.js'
 import { WorkspaceRemovalHandedOffError } from './workspace-removal-outcome.js'
 
 /**

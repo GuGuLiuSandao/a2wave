@@ -1,27 +1,27 @@
 import { isAbsolute, resolve, sep } from 'node:path'
+import type { GitConfig, P4Config, ScmSourceConfig } from '@a2wave/shared'
 import {
-  MAX_GIT_REPOS,
   createScmSourceInput,
+  MAX_GIT_REPOS,
   scmSourceConfigSchema,
   scmSourceTypeEnum,
   updateScmSourceInput,
 } from '@a2wave/shared'
-import type { GitConfig, P4Config, ScmSourceConfig } from '@a2wave/shared'
 import { and, count, desc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { db } from '../db/client.js'
 import { agents, runs, scmSources, scmWorkloadLeases } from '../db/schema.js'
 import { runExclusive } from '../db/transaction.js'
-import { scmSourceAuditDetails } from '../lib/audit-details.js'
 import { logAudit, writeAudit } from '../lib/audit.js'
+import { scmSourceAuditDetails } from '../lib/audit-details.js'
 import { isCodegraphEnabled, runCodegraphIndex } from '../lib/codegraph-index.js'
 import { checkGitConnection } from '../lib/git-sync.js'
 import {
-  WORKTREE_NAME_REGEX,
   defaultWorkspacesPath,
   isPerAgentWorkspaceName,
   perAgentWorkspaceName,
+  WORKTREE_NAME_REGEX,
 } from '../lib/git-workspace.js'
 import { createId } from '../lib/id.js'
 import { logger } from '../lib/logger.js'
@@ -52,9 +52,9 @@ import { createScmSource } from '../lib/scm-source.js'
 import { isolateManagedScmStorage } from '../lib/scm-storage-reclaim.js'
 import { findDurableScmSourceWorkload } from '../lib/scm-workload-lifecycle.js'
 import {
-  WorkspaceRemovalBlockedError,
   findPendingWorkspaceRemoval,
   removeSourceWorkspaceGuarded,
+  WorkspaceRemovalBlockedError,
 } from '../lib/scm-workspace-removal.js'
 import { validateStoredScmWorkspacesRoot } from '../lib/scm-workspace-safety.js'
 import { isAdmin } from '../middleware/auth-middleware.js'
@@ -77,11 +77,7 @@ const probeScmRateLimit = rateLimit({
 const RETIRED_SETUP_SCRIPT_ERROR = 'setupScript is no longer supported'
 
 function hasRetiredSetupScriptField(body: unknown): boolean {
-  return (
-    typeof body === 'object' &&
-    body !== null &&
-    Object.prototype.hasOwnProperty.call(body, 'setupScript')
-  )
+  return typeof body === 'object' && body !== null && Object.hasOwn(body, 'setupScript')
 }
 
 // ============================================================

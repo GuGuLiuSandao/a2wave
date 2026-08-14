@@ -179,13 +179,13 @@ const agentArg = {
 }
 
 export const evalCommand = defineCommand({
-  meta: { description: 'Manage Agent evaluation sets, cases and replay tasks' },
+  meta: { name: 'eval', description: 'Manage Agent evaluation sets, cases and replay tasks' },
   subCommands: {
     sets: defineCommand({
-      meta: { description: 'Manage evaluation sets' },
+      meta: { name: 'sets', description: 'Manage evaluation sets' },
       subCommands: {
         list: defineCommand({
-          meta: { description: 'List evaluation sets' },
+          meta: { name: 'list', description: 'List evaluation sets', agentMeta: { risk: 'read' } },
           args: { ...agentArg, ...jsonArg, ...urlArg },
           run: async ({ args }) => {
             const client = createClient({ url: args.url as string | undefined })
@@ -205,7 +205,11 @@ export const evalCommand = defineCommand({
         }),
 
         create: defineCommand({
-          meta: { description: 'Create an evaluation set' },
+          meta: {
+            name: 'create',
+            description: 'Create an evaluation set',
+            agentMeta: { risk: 'write' },
+          },
           args: {
             ...agentArg,
             name: { type: 'string', description: 'Set name', required: true },
@@ -226,7 +230,11 @@ export const evalCommand = defineCommand({
         }),
 
         update: defineCommand({
-          meta: { description: 'Update an evaluation set' },
+          meta: {
+            name: 'update',
+            description: 'Update an evaluation set',
+            agentMeta: { risk: 'write' },
+          },
           args: {
             ...agentArg,
             set: { type: 'positional', description: 'Set ID or name', required: true },
@@ -257,7 +265,11 @@ export const evalCommand = defineCommand({
         }),
 
         delete: defineCommand({
-          meta: { description: 'Delete an evaluation set (cases cascade; task history kept)' },
+          meta: {
+            name: 'delete',
+            agentMeta: { risk: 'high-risk-write' },
+            description: 'Delete an evaluation set (cases cascade; task history kept)',
+          },
           args: {
             ...agentArg,
             set: { type: 'positional', description: 'Set ID or name', required: true },
@@ -280,10 +292,10 @@ export const evalCommand = defineCommand({
     }),
 
     cases: defineCommand({
-      meta: { description: 'Manage the cases of an evaluation set' },
+      meta: { name: 'cases', description: 'Manage the cases of an evaluation set' },
       subCommands: {
         list: defineCommand({
-          meta: { description: 'List cases in a set' },
+          meta: { name: 'list', description: 'List cases in a set', agentMeta: { risk: 'read' } },
           args: {
             ...agentArg,
             set: { type: 'positional', description: 'Set ID or name', required: true },
@@ -309,7 +321,11 @@ export const evalCommand = defineCommand({
         }),
 
         add: defineCommand({
-          meta: { description: 'Add one case (single turn) to a set' },
+          meta: {
+            name: 'add',
+            description: 'Add one case (single turn) to a set',
+            agentMeta: { risk: 'write' },
+          },
           args: {
             ...agentArg,
             set: { type: 'positional', description: 'Set ID or name', required: true },
@@ -339,7 +355,11 @@ export const evalCommand = defineCommand({
         }),
 
         import: defineCommand({
-          meta: { description: 'Bulk-import cases from a YAML or JSON file' },
+          meta: {
+            name: 'import',
+            description: 'Bulk-import cases from a YAML or JSON file',
+            agentMeta: { risk: 'write' },
+          },
           args: {
             ...agentArg,
             set: { type: 'positional', description: 'Set ID or name', required: true },
@@ -394,7 +414,11 @@ export const evalCommand = defineCommand({
         }),
 
         delete: defineCommand({
-          meta: { description: 'Delete one case' },
+          meta: {
+            name: 'delete',
+            description: 'Delete one case',
+            agentMeta: { risk: 'high-risk-write' },
+          },
           args: {
             ...agentArg,
             set: { type: 'positional', description: 'Set ID or name', required: true },
@@ -418,7 +442,11 @@ export const evalCommand = defineCommand({
     }),
 
     run: defineCommand({
-      meta: { description: 'Start an evaluation task (replay a set against the Agent)' },
+      meta: {
+        name: 'run',
+        agentMeta: { risk: 'write' },
+        description: 'Start an evaluation task (replay a set against the Agent)',
+      },
       args: {
         ...agentArg,
         set: { type: 'string', description: 'Set ID or name to replay', required: true },
@@ -428,6 +456,10 @@ export const evalCommand = defineCommand({
           type: 'boolean',
           description:
             'With --wait, exit 1 if any case has a "fail" verdict OR errored during replay (for CI)',
+        },
+        verbose: {
+          type: 'boolean',
+          description: 'With --wait, print full turn transcripts instead of clipping them',
         },
         ...jsonArg,
         ...urlArg,
@@ -455,15 +487,19 @@ export const evalCommand = defineCommand({
         // this would make a failed task exit 0 and silently pass a CI gate.
         applyEvalExitCode(task, args['fail-on-fail'] === true)
         if (emit(args, { data: task })) return
-        printTask(task)
+        printTask(task, args.verbose === true)
       },
     }),
 
     tasks: defineCommand({
-      meta: { description: 'Inspect evaluation tasks' },
+      meta: { name: 'tasks', description: 'Inspect evaluation tasks' },
       subCommands: {
         list: defineCommand({
-          meta: { description: 'List evaluation tasks (newest first)' },
+          meta: {
+            name: 'list',
+            description: 'List evaluation tasks (newest first)',
+            agentMeta: { risk: 'read' },
+          },
           args: { ...agentArg, ...jsonArg, ...urlArg },
           run: async ({ args }) => {
             const client = createClient({ url: args.url as string | undefined })
@@ -486,10 +522,18 @@ export const evalCommand = defineCommand({
         }),
 
         get: defineCommand({
-          meta: { description: 'Show a task with its per-case results' },
+          meta: {
+            name: 'get',
+            description: 'Show a task with its per-case results',
+            agentMeta: { risk: 'read' },
+          },
           args: {
             ...agentArg,
             task: { type: 'positional', description: 'Task ID (evt_xxx)', required: true },
+            verbose: {
+              type: 'boolean',
+              description: 'Print full turn transcripts instead of clipping them',
+            },
             ...jsonArg,
             ...urlArg,
           },
@@ -500,12 +544,16 @@ export const evalCommand = defineCommand({
               `/api/agents/${agentId}/evaluation-tasks/${args.task}`,
             )
             if (emit(args, result)) return
-            printTask(result.data)
+            printTask(result.data, args.verbose === true)
           },
         }),
 
         verdict: defineCommand({
-          meta: { description: 'Record a manual verdict on one case result' },
+          meta: {
+            name: 'verdict',
+            description: 'Record a manual verdict on one case result',
+            agentMeta: { risk: 'write' },
+          },
           args: {
             ...agentArg,
             task: { type: 'positional', description: 'Task ID (evt_xxx)', required: true },
@@ -541,7 +589,11 @@ export const evalCommand = defineCommand({
         }),
 
         cancel: defineCommand({
-          meta: { description: 'Cancel a queued or running task' },
+          meta: {
+            name: 'cancel',
+            description: 'Cancel a queued or running task',
+            agentMeta: { risk: 'write' },
+          },
           args: {
             ...agentArg,
             task: { type: 'positional', description: 'Task ID (evt_xxx)', required: true },
@@ -563,7 +615,11 @@ export const evalCommand = defineCommand({
         }),
 
         delete: defineCommand({
-          meta: { description: 'Delete a task and its results' },
+          meta: {
+            name: 'delete',
+            description: 'Delete a task and its results',
+            agentMeta: { risk: 'high-risk-write' },
+          },
           args: {
             ...agentArg,
             task: { type: 'positional', description: 'Task ID (evt_xxx)', required: true },
@@ -586,7 +642,22 @@ export const evalCommand = defineCommand({
   },
 })
 
-function printTask(t: EvaluationTask): void {
+/**
+ * Characters of a turn body printed before truncation.
+ *
+ * The transcripts are the bulk of a task's output — a 50-case, 3-turn task
+ * printed 750+ lines of full request/expected/actual text — and the usual
+ * reason to run `eval tasks get` is "which cases failed", not "replay every
+ * transcript". `--verbose` prints them whole; `--json` is never truncated.
+ */
+const MAX_TURN_BODY_CHARS = 200
+
+function clipBody(text: string, verbose: boolean): string {
+  if (verbose || text.length <= MAX_TURN_BODY_CHARS) return text
+  return `${text.slice(0, MAX_TURN_BODY_CHARS)}… (${text.length - MAX_TURN_BODY_CHARS} more chars, --verbose for all)`
+}
+
+function printTask(t: EvaluationTask, verbose = false): void {
   console.log(`ID:       ${t.id}`)
   console.log(`Set:      ${t.setName}`)
   console.log(`Status:   ${t.status}`)
@@ -615,10 +686,14 @@ function printTask(t: EvaluationTask): void {
     // expectations so the row still shows what it would have asked.
     const turns = r.actualTurns ?? r.turnsSnapshot ?? []
     for (const turn of turns) {
-      console.log(`    request:  ${turn.request}`)
-      if (turn.expectedResponse) console.log(`    expected: ${turn.expectedResponse}`)
+      console.log(`    request:  ${clipBody(turn.request, verbose)}`)
+      if (turn.expectedResponse) {
+        console.log(`    expected: ${clipBody(turn.expectedResponse, verbose)}`)
+      }
       const actual = (turn as { actualResponse?: string | null }).actualResponse
-      if (actual) console.log(`    actual:   ${actual}`)
+      if (actual) console.log(`    actual:   ${clipBody(actual, verbose)}`)
+      // Errors are never clipped: they are short, and they are the reason
+      // someone opened this output.
       const turnError = (turn as { error?: string | null }).error
       if (turnError) console.log(`    turn error: ${turnError}`)
     }

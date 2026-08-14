@@ -33,7 +33,7 @@
  * list of I/O primitives. It cannot see through a helper call, so it is a
  * backstop against the easy mistake, not a proof.
  */
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'

@@ -24,7 +24,7 @@ import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { type TransactionDeps, runExclusive, withTransaction } from '../../db/transaction.js'
+import { runExclusive, type TransactionDeps, withTransaction } from '../../db/transaction.js'
 
 /** Stands in for `evaluation_tasks`, reduced to the terminal-write columns. */
 const tasks = sqliteTable('tasks', {

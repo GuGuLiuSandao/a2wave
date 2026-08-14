@@ -6,13 +6,20 @@ import { CliError } from '../errors.js'
 import {
   EXAMPLE_AGENT_YAML,
   computeDiff,
+  describeDestructiveDiff,
   parseAgentYaml,
   resolveRefs,
   toCreatePayload,
   toPublishPayload,
 } from '../lib/agent-yaml.js'
-import { confirmDestructive } from '../lib/args.js'
+import {
+  confirmDestructive,
+  forceArgs,
+  requireConfirmation,
+  resolveForceFlag,
+} from '../lib/args.js'
 import { emit, jsonArg, redactSecrets } from '../lib/output.js'
+import { pageArgs, pageQuery } from '../lib/paginate.js'
 
 interface Agent {
   id: string
@@ -147,14 +154,14 @@ function assertMemberRole(role: unknown): asserts role is (typeof MEMBER_ROLES)[
 }
 
 export const agentsCommand = defineCommand({
-  meta: { description: 'Manage Agents' },
+  meta: { name: 'agents', description: 'Manage Agents' },
   subCommands: {
     list: defineCommand({
-      meta: { description: 'List all Agents' },
-      args: { ...jsonArg, ...urlArg },
+      meta: { name: 'list', description: 'List all Agents', agentMeta: { risk: 'read' } },
+      args: { ...jsonArg, ...pageArgs, ...urlArg },
       run: async ({ args }) => {
         const client = createClient({ url: args.url as string | undefined })
-        const result = await client.get<{ data: Agent[] }>('/api/agents?pageSize=100')
+        const result = await client.get<{ data: Agent[] }>(`/api/agents?${pageQuery(args, 100)}`)
         if (emit(args, result)) return
         if (result.data.length === 0) {
           console.log('No Agents yet')
@@ -168,7 +175,11 @@ export const agentsCommand = defineCommand({
     }),
 
     get: defineCommand({
-      meta: { description: 'Show Agent details (accepts ID or name)' },
+      meta: {
+        name: 'get',
+        description: 'Show Agent details (accepts ID or name)',
+        agentMeta: { risk: 'read' },
+      },
       args: {
         id: { type: 'positional', description: 'Agent ID or name', required: true },
         ...jsonArg,
@@ -247,7 +258,17 @@ export const agentsCommand = defineCommand({
     }),
 
     update: defineCommand({
-      meta: { description: 'Update Agent (accepts ID or name)' },
+      meta: {
+        name: 'update',
+        description: 'Update Agent (accepts ID or name)',
+        agentMeta: {
+          risk: 'write',
+          notFor: [
+            'A full config change — use `agents apply` with a YAML; a sequence of updates is not equivalent and will not converge',
+          ],
+          examples: ['a2wave agents update agt_x --add-skill lark-mail'],
+        },
+      },
       args: {
         id: { type: 'positional', description: 'Agent ID or name', required: true },
         name: { type: 'string', description: 'New name' },
@@ -346,11 +367,14 @@ export const agentsCommand = defineCommand({
 
     diagnose: defineCommand({
       meta: {
+        name: 'diagnose',
+        agentMeta: { risk: 'read' },
         description:
           'Full Agent diagnosis (GET /agents/:id/diagnose): engine/Provider/Feishu/gateway, etc.',
       },
       args: {
         id: { type: 'positional', description: 'Agent ID or name', required: true },
+        ...jsonArg,
         ...urlArg,
       },
       run: async ({ args }) => {
@@ -358,6 +382,12 @@ export const agentsCommand = defineCommand({
         const agentId = await client.resolveAgentId(args.id as string)
         const result = await client.get<{ data: DiagnoseResult }>(`/api/agents/${agentId}/diagnose`)
         const d = result.data
+        // Set the CI-gate exit code BEFORE any early return: emit() bails out
+        // straight after printing, so deciding this afterwards would make
+        // `diagnose --json | jq` exit 0 on a red diagnosis. Same trap that
+        // `runs rerun --wait` and `eval run --wait` already guard against.
+        if (!d.ok) process.exitCode = 1
+        if (emit(args, result)) return
         const sym = { error: '✗', warn: '!', info: '·' } as const
         console.log(
           `${d.ok ? '✓ ok' : '✗ has errors'}  scope=${d.meta.scope}  at ${d.meta.checkedAt}`,
@@ -370,12 +400,15 @@ export const agentsCommand = defineCommand({
         for (const c of d.checks) {
           console.log(`${sym[c.severity]} [${c.severity}] ${c.id}: ${c.message}`)
         }
-        if (!d.ok) process.exitCode = 1
       },
     }),
 
     export: defineCommand({
-      meta: { description: 'Export Agent config as ZIP (accepts ID or name)' },
+      meta: {
+        name: 'export',
+        description: 'Export Agent config as ZIP (accepts ID or name)',
+        agentMeta: { risk: 'read' },
+      },
       args: {
         id: { type: 'positional', description: 'Agent ID or name', required: true },
         output: {
@@ -405,7 +438,11 @@ export const agentsCommand = defineCommand({
     }),
 
     import: defineCommand({
-      meta: { description: 'Import Agent from a ZIP file' },
+      meta: {
+        name: 'import',
+        description: 'Import Agent from a ZIP file',
+        agentMeta: { risk: 'write' },
+      },
       args: {
         file: { type: 'positional', description: 'ZIP file path', required: true },
         ...urlArg,
@@ -450,6 +487,22 @@ export const agentsCommand = defineCommand({
 
     apply: defineCommand({
       meta: {
+        name: 'apply',
+        agentMeta: {
+          risk: 'write',
+          preconditions: [
+            'Every name the YAML references (provider, skills, mcpServers, kbDocuments, workspace.source) already exists — apply resolves names to IDs and fails on an unknown one',
+            'Any ${ENV} placeholder in the YAML is exported in the calling shell',
+          ],
+          notFor: [
+            'Changing one field — `agents update` is one request against one field',
+            'Deleting an Agent; apply never removes one',
+          ],
+          examples: [
+            'a2wave agents apply -f bot.yaml --dry-run',
+            'a2wave agents apply --example > bot.yaml',
+          ],
+        },
         description:
           'YAML-driven idempotent apply (looked up by name; --example shows the full example yaml)',
       },
@@ -476,6 +529,9 @@ export const agentsCommand = defineCommand({
           default: true,
           description: 'Apply the publish block in the yaml. Use --no-publish to stay in draft',
         },
+        // Only consulted when the diff actually removes something; an additive
+        // apply never asks, so this flag is inert on the common path.
+        ...forceArgs,
         ...urlArg,
       },
       run: async ({ args }) => {
@@ -535,6 +591,21 @@ export const agentsCommand = defineCommand({
             )
             console.log(JSON.stringify(redactSecrets(diff), null, 2))
           } else {
+            // Apply is `write` in general, but a diff that UNMOUNTS something is
+            // the one shape a caller cannot undo from the YAML in hand — the
+            // thing removed is exactly what the new YAML no longer names. Only
+            // that subset is gated; labelling every apply high-risk would teach
+            // callers to pass --yes always and cost the protection here.
+            const destructive = describeDestructiveDiff(current.data, diff)
+            if (destructive.length > 0) {
+              await requireConfirmation(
+                'high-risk-write',
+                `This apply removes configuration from ${existing.id} (${yaml.name}):\n${destructive
+                  .map((line) => `  - ${line}`)
+                  .join('\n')}`,
+                resolveForceFlag(args),
+              )
+            }
             await client.patch(`/api/agents/${existing.id}`, diff)
             console.log(
               `Updated ${existing.id} (${yaml.name}) — fields: ${Object.keys(diff).join(', ')}`,
@@ -551,7 +622,11 @@ export const agentsCommand = defineCommand({
     }),
 
     publish: defineCommand({
-      meta: { description: 'Publish Agent (POST /agents/:id/publish)' },
+      meta: {
+        name: 'publish',
+        description: 'Publish Agent (POST /agents/:id/publish)',
+        agentMeta: { risk: 'write' },
+      },
       args: {
         id: { type: 'positional', description: 'Agent ID or name', required: true },
         channels: {
@@ -589,7 +664,11 @@ export const agentsCommand = defineCommand({
     }),
 
     stop: defineCommand({
-      meta: { description: 'Stop a published Agent (POST /agents/:id/stop)' },
+      meta: {
+        name: 'stop',
+        description: 'Stop a published Agent (POST /agents/:id/stop)',
+        agentMeta: { risk: 'write' },
+      },
       args: {
         id: { type: 'positional', description: 'Agent ID or name', required: true },
         ...urlArg,
@@ -603,7 +682,11 @@ export const agentsCommand = defineCommand({
     }),
 
     resume: defineCommand({
-      meta: { description: 'Resume a stopped Agent (POST /agents/:id/resume)' },
+      meta: {
+        name: 'resume',
+        description: 'Resume a stopped Agent (POST /agents/:id/resume)',
+        agentMeta: { risk: 'write' },
+      },
       args: {
         id: { type: 'positional', description: 'Agent ID or name', required: true },
         ...urlArg,
@@ -618,6 +701,8 @@ export const agentsCommand = defineCommand({
 
     clone: defineCommand({
       meta: {
+        name: 'clone',
+        agentMeta: { risk: 'write' },
         description:
           'Clone Agent (POST /agents/:id/clone); new agent is named "<original> (Copy)" with draft status',
       },
@@ -638,6 +723,8 @@ export const agentsCommand = defineCommand({
 
     'regenerate-api-key': defineCommand({
       meta: {
+        name: 'regenerate-api-key',
+        agentMeta: { risk: 'write' },
         description:
           'Regenerate the Agent endpointApiKey (POST /agents/:id/regenerate-api-key). Note: the old key becomes invalid immediately.',
       },
@@ -659,18 +746,24 @@ export const agentsCommand = defineCommand({
     }),
 
     members: defineCommand({
-      meta: { description: 'Manage Agent members' },
+      meta: { name: 'members', description: 'Manage Agent members' },
       subCommands: {
         list: defineCommand({
-          meta: { description: 'List all Agent members (including owner)' },
+          meta: {
+            name: 'list',
+            description: 'List all Agent members (including owner)',
+            agentMeta: { risk: 'read' },
+          },
           args: {
             agent: { type: 'positional', description: 'Agent ID or name', required: true },
+            ...jsonArg,
             ...urlArg,
           },
           run: async ({ args }) => {
             const client = createClient({ url: args.url as string | undefined })
             const agentId = await client.resolveAgentId(args.agent as string)
             const result = await client.get<{ data: MemberRow[] }>(`/api/agents/${agentId}/members`)
+            if (emit(args, result)) return
             const rows = result.data
             if (rows.length === 0) {
               console.log('No members yet')
@@ -685,7 +778,11 @@ export const agentsCommand = defineCommand({
         }),
 
         add: defineCommand({
-          meta: { description: 'Add a member to the Agent' },
+          meta: {
+            name: 'add',
+            description: 'Add a member to the Agent',
+            agentMeta: { risk: 'write' },
+          },
           args: {
             agent: { type: 'positional', description: 'Agent ID or name', required: true },
             user: {
@@ -711,7 +808,11 @@ export const agentsCommand = defineCommand({
         }),
 
         update: defineCommand({
-          meta: { description: 'Update an Agent member role' },
+          meta: {
+            name: 'update',
+            description: 'Update an Agent member role',
+            agentMeta: { risk: 'write' },
+          },
           args: {
             agent: { type: 'positional', description: 'Agent ID or name', required: true },
             user: {
@@ -737,7 +838,11 @@ export const agentsCommand = defineCommand({
         }),
 
         remove: defineCommand({
-          meta: { description: 'Remove an Agent member' },
+          meta: {
+            name: 'remove',
+            description: 'Remove an Agent member',
+            agentMeta: { risk: 'write' },
+          },
           args: {
             agent: { type: 'positional', description: 'Agent ID or name', required: true },
             user: {
@@ -762,6 +867,8 @@ export const agentsCommand = defineCommand({
 
     delete: defineCommand({
       meta: {
+        name: 'delete',
+        agentMeta: { risk: 'high-risk-write' },
         description:
           'Delete Agent (irreversible; accepts ID or name; asks for confirmation by default)',
       },
@@ -784,9 +891,14 @@ export const agentsCommand = defineCommand({
     }),
 
     stats: defineCommand({
-      meta: { description: 'Agent overview stats (KPI / asker count / channel breakdown)' },
+      meta: {
+        name: 'stats',
+        agentMeta: { risk: 'read' },
+        description: 'Agent overview stats (KPI / asker count / channel breakdown)',
+      },
       args: {
         id: { type: 'positional', description: 'Agent ID or name', required: true },
+        ...jsonArg,
         ...urlArg,
       },
       run: async ({ args }) => {
@@ -794,6 +906,7 @@ export const agentsCommand = defineCommand({
         const agentId = await client.resolveAgentId(args.id as string)
         // Note: /stats returns the stats object directly, not wrapped in { data }
         const s = await client.get<AgentStats>(`/api/agents/${agentId}/stats`)
+        if (emit(args, s)) return
         console.log(`Total runs:    ${s.total}`)
         console.log(`Success rate:  ${s.successRate}`)
         console.log(`Avg duration:  ${s.avgDuration}`)
@@ -812,12 +925,13 @@ export const agentsCommand = defineCommand({
     }),
 
     artifacts: defineCommand({
-      meta: { description: 'Manage Agent artifacts' },
+      meta: { name: 'artifacts', description: 'Manage Agent artifacts' },
       subCommands: {
         list: defineCommand({
-          meta: { description: 'List Agent artifacts' },
+          meta: { name: 'list', description: 'List Agent artifacts', agentMeta: { risk: 'read' } },
           args: {
             agent: { type: 'positional', description: 'Agent ID or name', required: true },
+            ...jsonArg,
             ...urlArg,
           },
           run: async ({ args }) => {
@@ -826,6 +940,7 @@ export const agentsCommand = defineCommand({
             const { data } = await client.get<{ data: ArtifactRow[] }>(
               `/api/artifacts?agentId=${agentId}`,
             )
+            if (emit(args, { data })) return
             if (data.length === 0) {
               console.log('No artifacts yet')
               return
@@ -837,7 +952,11 @@ export const agentsCommand = defineCommand({
         }),
 
         download: defineCommand({
-          meta: { description: 'Download a single artifact' },
+          meta: {
+            name: 'download',
+            description: 'Download a single artifact',
+            agentMeta: { risk: 'read' },
+          },
           args: {
             id: { type: 'positional', description: 'Artifact ID (art_xxx)', required: true },
             out: {
@@ -878,13 +997,23 @@ export const agentsCommand = defineCommand({
         }),
 
         delete: defineCommand({
-          meta: { description: 'Delete a single artifact' },
+          meta: {
+            name: 'delete',
+            description: 'Delete a single artifact',
+            agentMeta: { risk: 'high-risk-write' },
+          },
           args: {
             id: { type: 'positional', description: 'Artifact ID (art_xxx)', required: true },
+            ...forceArgs,
             ...urlArg,
           },
           run: async ({ args }) => {
             const client = createClient({ url: args.url as string | undefined })
+            await requireConfirmation(
+              'high-risk-write',
+              `This will permanently delete artifact ${args.id as string}. This action is irreversible.`,
+              resolveForceFlag(args),
+            )
             await client.del(`/api/artifacts/${args.id as string}`)
             console.log('Artifact deleted ✓')
           },
@@ -893,27 +1022,30 @@ export const agentsCommand = defineCommand({
     }),
 
     memory: defineCommand({
-      meta: { description: 'Manage Agent memory' },
+      meta: { name: 'memory', description: 'Manage Agent memory' },
       subCommands: {
         stats: defineCommand({
-          meta: { description: 'Memory stats' },
+          meta: { name: 'stats', description: 'Memory stats', agentMeta: { risk: 'read' } },
           args: {
             agent: { type: 'positional', description: 'Agent ID or name', required: true },
+            ...jsonArg,
             ...urlArg,
           },
           run: async ({ args }) => {
             const client = createClient({ url: args.url as string | undefined })
             const agentId = await client.resolveAgentId(args.agent as string)
             const { data } = await client.get<{ data: unknown }>(`/api/memories/${agentId}/stats`)
-            console.log(JSON.stringify(data, null, 2))
+            if (emit(args, data)) return
+            console.log(JSON.stringify(redactSecrets(data), null, 2))
           },
         }),
 
         search: defineCommand({
-          meta: { description: 'Search memories' },
+          meta: { name: 'search', description: 'Search memories', agentMeta: { risk: 'read' } },
           args: {
             agent: { type: 'positional', description: 'Agent ID or name', required: true },
             query: { type: 'string', description: 'Search query', required: true },
+            ...jsonArg,
             ...urlArg,
           },
           run: async ({ args }) => {
@@ -923,12 +1055,17 @@ export const agentsCommand = defineCommand({
             const { data } = await client.get<{ data: { results: unknown[] } }>(
               `/api/memories/${agentId}/search?q=${q}`,
             )
-            console.log(JSON.stringify(data.results, null, 2))
+            if (emit(args, data.results)) return
+            console.log(JSON.stringify(redactSecrets(data.results), null, 2))
           },
         }),
 
         reindex: defineCommand({
-          meta: { description: 'Rebuild the memory index' },
+          meta: {
+            name: 'reindex',
+            description: 'Rebuild the memory index',
+            agentMeta: { risk: 'write' },
+          },
           args: {
             agent: { type: 'positional', description: 'Agent ID or name', required: true },
             ...urlArg,
@@ -942,7 +1079,11 @@ export const agentsCommand = defineCommand({
         }),
 
         consolidate: defineCommand({
-          meta: { description: 'Consolidate / merge memories' },
+          meta: {
+            name: 'consolidate',
+            description: 'Consolidate / merge memories',
+            agentMeta: { risk: 'write' },
+          },
           args: {
             agent: { type: 'positional', description: 'Agent ID or name', required: true },
             ...urlArg,
@@ -958,7 +1099,11 @@ export const agentsCommand = defineCommand({
     }),
 
     'import-url': defineCommand({
-      meta: { description: 'Import Agent from a remote a2wave instance URL' },
+      meta: {
+        name: 'import-url',
+        description: 'Import Agent from a remote a2wave instance URL',
+        agentMeta: { risk: 'write' },
+      },
       args: {
         source: {
           type: 'positional',

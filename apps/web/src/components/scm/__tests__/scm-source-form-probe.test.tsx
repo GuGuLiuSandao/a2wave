@@ -7,12 +7,13 @@
  * rather than the stored ones, and a multi-repo failure names the repo that
  * failed instead of only reporting a count.
  */
-import i18n from '@/i18n'
+
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import i18n from '@/i18n'
 
 const idleMutation = () => ({
   mutate: vi.fn(),
