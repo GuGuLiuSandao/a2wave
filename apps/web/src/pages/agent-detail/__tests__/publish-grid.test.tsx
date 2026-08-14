@@ -46,6 +46,7 @@ const ALL_CHANNELS = [
   'feishu',
   'slack',
   'discord',
+  'qq_official',
   'schedule',
   'chat_app',
   'glab',
@@ -61,7 +62,7 @@ async function openConfig(user: ReturnType<typeof userEvent.setup>, key: string)
 }
 
 describe('PublishTab — 渠道卡片网格', () => {
-  it('默认渲染全部 10 个渠道卡片', () => {
+  it('默认渲染全部 11 个渠道卡片', () => {
     renderWithProviders(<PublishTab {...baseProps()} />)
 
     for (const key of ALL_CHANNELS) {
@@ -69,13 +70,13 @@ describe('PublishTab — 渠道卡片网格', () => {
     }
   })
 
-  it('筛选「聊天机器人」只保留飞书 / Slack / Discord', async () => {
+  it('筛选「聊天机器人」只保留飞书 / Slack / Discord / QQ 官方机器人', async () => {
     const user = userEvent.setup()
     renderWithProviders(<PublishTab {...baseProps()} />)
 
     await user.click(screen.getByText('聊天机器人'))
 
-    for (const key of ['feishu', 'slack', 'discord']) {
+    for (const key of ['feishu', 'slack', 'discord', 'qq_official']) {
       expect(screen.getByTestId(`channel-card-${key}`)).toBeInTheDocument()
     }
     for (const key of ['api', 'oauth', 'a2a', 'schedule', 'chat_app', 'glab', 'gh']) {
@@ -83,7 +84,7 @@ describe('PublishTab — 渠道卡片网格', () => {
     }
   })
 
-  it('筛选回「全部」恢复 8 张卡片', async () => {
+  it('筛选回「全部」恢复全部渠道卡片', async () => {
     const user = userEvent.setup()
     renderWithProviders(<PublishTab {...baseProps()} />)
 
@@ -94,6 +95,65 @@ describe('PublishTab — 渠道卡片网格', () => {
     for (const key of ALL_CHANNELS) {
       expect(screen.getByTestId(`channel-card-${key}`)).toBeInTheDocument()
     }
+  })
+
+  it('switching Agents clears QQ Official credentials and resets channel defaults', async () => {
+    const user = userEvent.setup()
+    const configuredAgent = {
+      id: 'agt_qq_1',
+      publishStatus: 'draft',
+      publishChannels: ['qq_official'],
+      qqOfficialConfig: {
+        appId: '102000000',
+        appSecret: 'secret-from-first-agent',
+        enableGroupAndC2c: false,
+        enableGuildMessages: false,
+        enableGuildDirectMessages: false,
+        groupTriggerOnAt: false,
+        groupTriggerOnNewMessage: true,
+        groupReplyMode: 'none',
+        c2cReplyMode: 'none',
+        guildReplyMode: 'none',
+        guildDmReplyMode: 'none',
+        sendArtifactsAsFile: false,
+      },
+    }
+    const unconfiguredAgent = {
+      id: 'agt_qq_2',
+      publishStatus: 'draft',
+      publishChannels: [],
+      qqOfficialConfig: null,
+    }
+    const firstProps = { ...baseProps(), agentId: configuredAgent.id }
+    const { rerender } = renderWithProviders(
+      <PublishTab {...firstProps} agent={configuredAgent as never} />,
+    )
+    await openConfig(user, 'qq_official')
+
+    expect(screen.getByLabelText('App ID')).toHaveValue('102000000')
+    expect(screen.getByLabelText('App Secret')).toHaveValue('secret-from-first-agent')
+
+    rerender(
+      <PublishTab
+        {...baseProps()}
+        agentId={unconfiguredAgent.id}
+        agent={unconfiguredAgent as never}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('App ID')).toHaveValue('')
+      expect(screen.getByLabelText('App Secret')).toHaveValue('')
+    })
+    const switches = within(screen.getByRole('dialog')).getAllByRole('switch')
+    expect(switches.map((item) => item.getAttribute('aria-checked'))).toEqual([
+      'true',
+      'true',
+      'true',
+      'true',
+      'false',
+      'true',
+    ])
   })
 
   it('REST API 卡片没有开关，只显示「始终启用」', () => {

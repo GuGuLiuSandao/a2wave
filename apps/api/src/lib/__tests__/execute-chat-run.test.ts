@@ -829,6 +829,45 @@ describe('executeChatRun', () => {
     expect(mockUpdateSet).toHaveBeenCalledWith({ executionMetadata: null })
   })
 
+  it('recovers QQ Official conversation context from the previous completed run', async () => {
+    const nativeChatContext = {
+      channel: {
+        channel_type: 'qq_official',
+        channel_info: {
+          app_id: '102000000',
+          scene: 'c2c',
+          message_id: 'message-2',
+          sender_open_id: 'user-1',
+        },
+        user_info: null,
+      },
+    }
+    setupSelectSequence(
+      baseAgent,
+      {
+        ...baseRun,
+        triggerSource: 'qq_official',
+        triggerSessionId: '102000000:c2c:user-1',
+        executionMetadata: { nativeChatContext },
+      },
+      { result: { chatId: 'chat_qq_recovered' } },
+      baseScmSource,
+      undefined,
+    )
+
+    const { executeChatRun } = await import('../execute-chat-run.js')
+    await executeChatRun('agt_1', 'run_1')
+
+    expect(mockExecuteWithRetry).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        chatId: 'chat_qq_recovered',
+        context: nativeChatContext,
+      }),
+      expect.any(Object),
+    )
+  })
+
   it('resolves persisted native attachment ids and materializes their staged refs', async () => {
     const nativeChatContext = {
       channel: {

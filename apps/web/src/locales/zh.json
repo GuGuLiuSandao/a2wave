@@ -2214,6 +2214,7 @@
       "agent.publish": "发布 Agent",
       "agent.publish_channel": "保存发布渠道配置",
       "agent.qq_official_registration_start": "发起 QQ 官方机器人扫码创建",
+      "agent.qq_official_registration_complete": "完成 QQ 官方机器人扫码创建",
       "agent.restricted_mcp_blocked": "受限 MCP 已拦截",
       "agent.resume": "恢复 Agent",
       "agent.share": "分享 Agent",

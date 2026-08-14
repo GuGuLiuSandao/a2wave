@@ -1,5 +1,6 @@
 import { readFile, stat } from 'node:fs/promises'
 import type {
+  AttachmentRef,
   QQOfficialChannelInfo,
   QQOfficialConfig,
   RunChannelContextQQOfficial,
@@ -11,13 +12,18 @@ import { db } from '../db/client.js'
 import { agents } from '../db/schema.js'
 import { buildArtifactLinkLinesSync } from './artifact-links.js'
 import { type RegisteredArtifact, getDirectorySourceSize } from './artifact-storage.js'
+import { deleteStagedAttachment } from './attachment-storage.js'
 import { logger } from './logger.js'
 import { prepareNativeArtifactUpload } from './native-chat-artifacts.js'
 import {
   type NativeChatAttachment,
   resolveNativeChatAttachments,
 } from './native-chat-attachments.js'
-import { reserveNativeChatRun } from './native-chat-runner.js'
+import {
+  isNativeChatRunReservedError,
+  preflightNativeChatRun,
+  reserveNativeChatRun,
+} from './native-chat-runner.js'
 import { appendNativeArtifactDownloadSection, prepareNativeChatText } from './native-chat-text.js'
 import { buildQQOfficialChannel } from './run-channel.js'
 
@@ -36,6 +42,24 @@ const QQ_GUILD_DIRECT_MESSAGES_INTENT = 1 << 12
 
 type NormalizedQQOfficialConfig = ReturnType<typeof qqOfficialConfigSchema.parse>
 type QQScene = 'group' | 'c2c' | 'guild' | 'guild_dm'
+
+async function cleanupQQAttachmentRefs(
+  agentId: string,
+  messageId: string,
+  attachments: AttachmentRef[],
+): Promise<void> {
+  const results = await Promise.allSettled(
+    attachments.map((attachment) => deleteStagedAttachment(attachment.token)),
+  )
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      logger.warn(
+        { error: result.reason, agentId, messageId },
+        'Failed to clean up unreserved QQ attachment',
+      )
+    }
+  }
+}
 
 export function buildQQOfficialIntents(config: NormalizedQQOfficialConfig): number {
   let intents = 0
@@ -733,6 +757,13 @@ export class QQOfficialConnectionManager {
   ): Promise<void> {
     const message = normalizeQQOfficialMessage(eventType, data)
     if (!message || !shouldTriggerQQOfficialMessage(connection.config, message)) return
+    const eventId = `qq_official:${message.id}`
+    const preflight = await preflightNativeChatRun({
+      agentId,
+      source: 'qq_official',
+      eventId,
+    })
+    if (preflight.status !== 'ready') return
     const attachments: NativeChatAttachment[] = message.attachments.map((attachment) => ({
       source: 'qq_official',
       remoteUrl: attachment.url,
@@ -770,17 +801,29 @@ export class QQOfficialConnectionManager {
                 guildId: message.guildId as string,
               })
             : buildQQOfficialChannel({ ...common, scene: 'c2c' })
-    const result = await reserveNativeChatRun({
-      agentId,
-      source: 'qq_official',
-      eventId: `qq_official:${message.id}`,
-      conversationId: buildQQOfficialConversationId(connection.config.appId, message),
-      intent,
-      channel: built.ctx as RunChannelContextQQOfficial,
-      displayName: built.displayName,
-      attachments: attachmentRefs,
-      attachmentConsumerId: `agent:${agentId}`,
-    })
+    let result: Awaited<ReturnType<typeof reserveNativeChatRun>>
+    try {
+      result = await reserveNativeChatRun({
+        agentId,
+        source: 'qq_official',
+        eventId,
+        conversationId: buildQQOfficialConversationId(connection.config.appId, message),
+        intent,
+        channel: built.ctx as RunChannelContextQQOfficial,
+        displayName: built.displayName,
+        attachments: attachmentRefs,
+        attachmentConsumerId: `agent:${agentId}`,
+      })
+    } catch (error) {
+      if (!isNativeChatRunReservedError(error)) {
+        await cleanupQQAttachmentRefs(agentId, message.id, attachmentRefs)
+      }
+      throw error
+    }
+    if (result.status === 'duplicate' || result.status === 'ignored') {
+      await cleanupQQAttachmentRefs(agentId, message.id, attachmentRefs)
+      return
+    }
     if (result.status === 'queue_full') {
       await this.sendMessageByContext(
         agentId,
@@ -788,6 +831,17 @@ export class QQOfficialConnectionManager {
         'Agent queue is full.',
       ).catch((error) =>
         logger.warn({ error, agentId, messageId: message.id }, 'Failed to send QQ queue reply'),
+      )
+    } else if (result.status === 'scheduling_failed') {
+      await this.sendMessageByContext(
+        agentId,
+        built.ctx as RunChannelContextQQOfficial,
+        'Agent could not schedule this message.',
+      ).catch((error) =>
+        logger.warn(
+          { error, agentId, messageId: message.id },
+          'Failed to send QQ scheduling failure reply',
+        ),
       )
     }
   }

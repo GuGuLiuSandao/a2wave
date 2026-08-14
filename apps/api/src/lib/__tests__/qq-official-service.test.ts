@@ -5,6 +5,25 @@ import { join } from 'node:path'
 import { qqOfficialConfigSchema } from '@a2wave/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type WebSocket from 'ws'
+
+const mockPreflightNativeChatRun = vi.hoisted(() => vi.fn())
+const mockReserveNativeChatRun = vi.hoisted(() => vi.fn())
+const mockResolveNativeChatAttachments = vi.hoisted(() => vi.fn())
+const mockDeleteStagedAttachment = vi.hoisted(() => vi.fn())
+const mockIsNativeChatRunReservedError = vi.hoisted(() => vi.fn())
+
+vi.mock('../native-chat-runner.js', () => ({
+  isNativeChatRunReservedError: mockIsNativeChatRunReservedError,
+  preflightNativeChatRun: mockPreflightNativeChatRun,
+  reserveNativeChatRun: mockReserveNativeChatRun,
+}))
+vi.mock('../native-chat-attachments.js', () => ({
+  resolveNativeChatAttachments: mockResolveNativeChatAttachments,
+}))
+vi.mock('../attachment-storage.js', () => ({
+  deleteStagedAttachment: mockDeleteStagedAttachment,
+}))
+
 import {
   QQIdentifyLimiter,
   QQOfficialApiClient,
@@ -20,7 +39,10 @@ import {
 
 const config = qqOfficialConfigSchema.parse({ appId: '102000000', appSecret: 'secret' })
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.clearAllMocks()
+})
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -31,6 +53,128 @@ function deferred<T>() {
 }
 
 describe('QQ Official Gateway messages', () => {
+  it('deduplicates a replay before downloading its attachments', async () => {
+    mockPreflightNativeChatRun.mockResolvedValue({ status: 'duplicate' })
+    const manager = new QQOfficialConnectionManager()
+    const internals = manager as unknown as {
+      handleDispatch: (...args: unknown[]) => Promise<void>
+      sendMessageByContext: (...args: unknown[]) => Promise<void>
+    }
+    internals.sendMessageByContext = vi.fn().mockResolvedValue(undefined)
+
+    await internals.handleDispatch('agent-1', { config }, 'C2C_MESSAGE_CREATE', {
+      id: 'message-1',
+      content: 'review',
+      author: { user_openid: 'user-1' },
+      attachments: [{ url: 'https://example.qq.com/a.png', filename: 'a.png' }],
+    })
+
+    expect(mockResolveNativeChatAttachments).not.toHaveBeenCalled()
+    expect(mockReserveNativeChatRun).not.toHaveBeenCalled()
+  })
+
+  it('deletes staged attachments when a concurrent delivery wins the reservation race', async () => {
+    mockPreflightNativeChatRun.mockResolvedValue({ status: 'ready' })
+    mockResolveNativeChatAttachments.mockResolvedValue([
+      { token: 'att_internal', name: 'a.png', mimeType: 'image/png', size: 42 },
+    ])
+    mockReserveNativeChatRun.mockResolvedValue({ status: 'duplicate' })
+    const manager = new QQOfficialConnectionManager()
+    const internals = manager as unknown as {
+      handleDispatch: (...args: unknown[]) => Promise<void>
+    }
+
+    await internals.handleDispatch('agent-1', { config }, 'C2C_MESSAGE_CREATE', {
+      id: 'message-1',
+      content: 'review',
+      author: { user_openid: 'user-1' },
+      attachments: [{ url: 'https://example.qq.com/a.png', filename: 'a.png' }],
+    })
+
+    expect(mockDeleteStagedAttachment).toHaveBeenCalledWith('att_internal')
+  })
+
+  it('preserves staged attachments when a durable Run exists despite a later failure', async () => {
+    mockPreflightNativeChatRun.mockResolvedValue({ status: 'ready' })
+    mockResolveNativeChatAttachments.mockResolvedValue([
+      { token: 'att_internal', name: 'a.png', mimeType: 'image/png', size: 42 },
+    ])
+    const reservedError = Object.assign(new Error('queue database unavailable'), {
+      nativeChatRunReserved: true,
+    })
+    mockReserveNativeChatRun.mockRejectedValue(reservedError)
+    mockIsNativeChatRunReservedError.mockReturnValue(true)
+    const manager = new QQOfficialConnectionManager()
+    const internals = manager as unknown as {
+      handleDispatch: (...args: unknown[]) => Promise<void>
+    }
+
+    await expect(
+      internals.handleDispatch('agent-1', { config }, 'C2C_MESSAGE_CREATE', {
+        id: 'message-1',
+        content: 'review',
+        author: { user_openid: 'user-1' },
+        attachments: [{ url: 'https://example.qq.com/a.png', filename: 'a.png' }],
+      }),
+    ).rejects.toBe(reservedError)
+
+    expect(mockDeleteStagedAttachment).not.toHaveBeenCalled()
+  })
+
+  it('preserves staged attachments for rerunning a queue-saturated failed Run', async () => {
+    mockPreflightNativeChatRun.mockResolvedValue({ status: 'ready' })
+    mockResolveNativeChatAttachments.mockResolvedValue([
+      { token: 'att_internal', name: 'a.png', mimeType: 'image/png', size: 42 },
+    ])
+    mockReserveNativeChatRun.mockResolvedValue({ status: 'queue_full', runId: 'run_failed' })
+    const manager = new QQOfficialConnectionManager()
+    const internals = manager as unknown as {
+      handleDispatch: (...args: unknown[]) => Promise<void>
+      sendMessageByContext: (...args: unknown[]) => Promise<void>
+    }
+    internals.sendMessageByContext = vi.fn().mockResolvedValue(undefined)
+
+    await internals.handleDispatch('agent-1', { config }, 'C2C_MESSAGE_CREATE', {
+      id: 'message-1',
+      content: 'review',
+      author: { user_openid: 'user-1' },
+      attachments: [{ url: 'https://example.qq.com/a.png', filename: 'a.png' }],
+    })
+
+    expect(mockDeleteStagedAttachment).not.toHaveBeenCalled()
+  })
+
+  it('preserves staged attachments for rerunning a scheduling-failed Run', async () => {
+    mockPreflightNativeChatRun.mockResolvedValue({ status: 'ready' })
+    mockResolveNativeChatAttachments.mockResolvedValue([
+      { token: 'att_internal', name: 'a.png', mimeType: 'image/png', size: 42 },
+    ])
+    mockReserveNativeChatRun.mockResolvedValue({
+      status: 'scheduling_failed',
+      runId: 'run_failed',
+    })
+    const manager = new QQOfficialConnectionManager()
+    const internals = manager as unknown as {
+      handleDispatch: (...args: unknown[]) => Promise<void>
+      sendMessageByContext: (...args: unknown[]) => Promise<void>
+    }
+    internals.sendMessageByContext = vi.fn().mockResolvedValue(undefined)
+
+    await internals.handleDispatch('agent-1', { config }, 'C2C_MESSAGE_CREATE', {
+      id: 'message-1',
+      content: 'review',
+      author: { user_openid: 'user-1' },
+      attachments: [{ url: 'https://example.qq.com/a.png', filename: 'a.png' }],
+    })
+
+    expect(mockDeleteStagedAttachment).not.toHaveBeenCalled()
+    expect(internals.sendMessageByContext).toHaveBeenCalledWith(
+      'agent-1',
+      expect.anything(),
+      'Agent could not schedule this message.',
+    )
+  })
+
   it('requests only the gateway intents enabled in channel config', () => {
     expect(buildQQOfficialIntents(config)).toBe((1 << 25) | (1 << 30) | (1 << 12))
     expect(

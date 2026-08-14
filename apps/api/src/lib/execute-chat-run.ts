@@ -19,6 +19,7 @@ import { WorktreeBranchLockedError, WorktreeDirtyError } from './git-workspace.j
 import { createId } from './id.js'
 import { logger } from './logger.js'
 import { resolveNativeChatAttachments } from './native-chat-attachments.js'
+import { isNativeChatChannel } from './native-chat-channel.js'
 import { lookupPreviousOAuthSessionChatId } from './oauth-session.js'
 import { sweepPendingContexts, takePendingContext, takePendingJob } from './pending-job-registry.js'
 import { runWithLifecycle } from './run-launcher.js'
@@ -401,7 +402,7 @@ async function resolveQueuedChatId(run: typeof runs.$inferSelect): Promise<strin
     )
   }
 
-  if (run.triggerSource !== 'slack' && run.triggerSource !== 'discord') return undefined
+  if (!isNativeChatChannel(run.triggerSource)) return undefined
   const previous = (
     await db
       .select({ result: runs.result })

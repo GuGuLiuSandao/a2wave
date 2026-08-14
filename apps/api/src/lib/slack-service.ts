@@ -386,6 +386,8 @@ export class SlackConnectionManager {
     })
     if (result.status === 'queue_full') {
       await this.sendMessageByContext(agentId, ctx, 'Agent queue is full.')
+    } else if (result.status === 'scheduling_failed') {
+      await this.sendMessageByContext(agentId, ctx, 'Agent could not schedule this message.')
     }
   }
 

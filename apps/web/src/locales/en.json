@@ -2187,6 +2187,7 @@
       "agent.publish": "Publish Agent",
       "agent.publish_channel": "Save publish channel config",
       "agent.qq_official_registration_start": "Start QQ Official Bot QR registration",
+      "agent.qq_official_registration_complete": "Complete QQ Official Bot QR registration",
       "agent.restricted_mcp_blocked": "Restricted MCP blocked",
       "agent.resume": "Resume Agent",
       "agent.share": "Share Agent",
