@@ -25,8 +25,8 @@ export function prepareQQOfficialPublishConfig(
   wasSubmitted: boolean,
 ): PreparedQQOfficialPublishConfig {
   let update = submitted
-  if (wasSubmitted && update?.appSecret === MASKED_SECRET && stored?.appSecret) {
-    update = { ...update, appSecret: stored.appSecret }
+  if (wasSubmitted && update?.appSecret === MASKED_SECRET) {
+    update = { ...update, appSecret: stored?.appSecret ?? '' }
   }
   const effective = wasSubmitted ? update : stored
   return {
@@ -99,6 +99,13 @@ export async function handleQQOfficialRegistration(
       return c.json({ data: task })
     }
     const result = await pollQQOfficialRegistration(parsed.data)
+    if (result.status === 'completed') {
+      logAudit(c, {
+        action: 'agent.qq_official_registration_complete',
+        resource: 'agent',
+        resourceId: id,
+      })
+    }
     return c.json({ data: result })
   } catch (error) {
     return c.json(

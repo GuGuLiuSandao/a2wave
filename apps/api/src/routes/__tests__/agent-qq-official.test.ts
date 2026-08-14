@@ -44,6 +44,21 @@ describe('QQ Official publish config', () => {
       missingRequired: false,
     })
   })
+
+  it('does not accept a masked Secret when there is no stored credential to restore', () => {
+    expect(
+      prepareQQOfficialPublishConfig(
+        ['qq_official'],
+        { appId: '102000000', appSecret: '********' },
+        null,
+        true,
+      ),
+    ).toEqual({
+      effective: { appId: '102000000', appSecret: '' },
+      update: { appId: '102000000', appSecret: '' },
+      missingRequired: true,
+    })
+  })
 })
 
 describe('QQ Official registration route', () => {
@@ -78,7 +93,7 @@ describe('QQ Official registration route', () => {
     )
   })
 
-  it('polls a registration task without exposing credentials to the audit log', async () => {
+  it('audits completed registration without exposing credentials to the audit log', async () => {
     mocks.poll.mockResolvedValue({
       status: 'completed',
       appId: '102000000',
@@ -94,7 +109,16 @@ describe('QQ Official registration route', () => {
     expect(await response.json()).toEqual({
       data: { status: 'completed', appId: '102000000', appSecret: 'secret' },
     })
-    expect(mocks.audit).not.toHaveBeenCalled()
+    expect(mocks.audit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'agent.qq_official_registration_complete',
+        resource: 'agent',
+        resourceId: 'agent-1',
+      }),
+    )
+    expect(JSON.stringify(mocks.audit.mock.calls)).not.toContain('secret')
+    expect(JSON.stringify(mocks.audit.mock.calls)).not.toContain('key')
   })
 
   it('rejects malformed requests and maps Tencent failures to 502', async () => {

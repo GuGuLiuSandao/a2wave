@@ -257,6 +257,15 @@ export class DiscordConnectionManager {
             'Failed to send Discord queue reply',
           ),
         )
+    } else if (result.status === 'scheduling_failed') {
+      await message
+        .reply('Agent could not schedule this message.')
+        .catch((error) =>
+          logger.warn(
+            { error, agentId, messageId: message.id },
+            'Failed to send Discord scheduling failure reply',
+          ),
+        )
     }
   }
 

@@ -865,20 +865,18 @@ export function PublishTab({
       }
 
       const savedQQOfficial = agent.qqOfficialConfig
-      if (savedQQOfficial) {
-        setQQOfficialAppId(savedQQOfficial.appId)
-        setQQOfficialAppSecret(savedQQOfficial.appSecret)
-        setQQEnableGroupAndC2c(savedQQOfficial.enableGroupAndC2c ?? true)
-        setQQEnableGuildMessages(savedQQOfficial.enableGuildMessages ?? true)
-        setQQEnableGuildDirectMessages(savedQQOfficial.enableGuildDirectMessages ?? true)
-        setQQGroupTriggerOnAt(savedQQOfficial.groupTriggerOnAt ?? true)
-        setQQGroupTriggerOnNewMessage(savedQQOfficial.groupTriggerOnNewMessage ?? false)
-        setQQGroupReplyMode(savedQQOfficial.groupReplyMode ?? 'reply')
-        setQQC2cReplyMode(savedQQOfficial.c2cReplyMode ?? 'reply')
-        setQQGuildReplyMode(savedQQOfficial.guildReplyMode ?? 'reply')
-        setQQGuildDmReplyMode(savedQQOfficial.guildDmReplyMode ?? 'reply')
-        setQQSendArtifactsAsFile(savedQQOfficial.sendArtifactsAsFile ?? true)
-      }
+      setQQOfficialAppId(savedQQOfficial?.appId ?? '')
+      setQQOfficialAppSecret(savedQQOfficial?.appSecret ?? '')
+      setQQEnableGroupAndC2c(savedQQOfficial?.enableGroupAndC2c ?? true)
+      setQQEnableGuildMessages(savedQQOfficial?.enableGuildMessages ?? true)
+      setQQEnableGuildDirectMessages(savedQQOfficial?.enableGuildDirectMessages ?? true)
+      setQQGroupTriggerOnAt(savedQQOfficial?.groupTriggerOnAt ?? true)
+      setQQGroupTriggerOnNewMessage(savedQQOfficial?.groupTriggerOnNewMessage ?? false)
+      setQQGroupReplyMode(savedQQOfficial?.groupReplyMode ?? 'reply')
+      setQQC2cReplyMode(savedQQOfficial?.c2cReplyMode ?? 'reply')
+      setQQGuildReplyMode(savedQQOfficial?.guildReplyMode ?? 'reply')
+      setQQGuildDmReplyMode(savedQQOfficial?.guildDmReplyMode ?? 'reply')
+      setQQSendArtifactsAsFile(savedQQOfficial?.sendArtifactsAsFile ?? true)
 
       // Hydrate unconditionally, falling back to defaults when the stored config is
       // null. Guarding on truthiness left the previous copy in the form after the
