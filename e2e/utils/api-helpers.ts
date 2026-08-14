@@ -394,20 +394,47 @@ export interface CreatedUser {
 /**
  * Create a non-admin user via admin token. Used by member-management e2e to
  * spin up owner / editor / viewer / stranger fixtures with a unique suffix.
+ *
+ * There is no admin-set-password endpoint to call: admins issue an invitation and the
+ * invitee chooses their own password. So the fixture walks that same two-step flow —
+ * issue a link, then accept it — rather than reaching past it into the database.
  */
 export async function createTestUser(
   adminToken: string,
   data: { username: string; password: string; displayName?: string },
 ): Promise<CreatedUser> {
-  const res = await fetch(`${API_BASE}/api/users`, {
+  const email = `${data.username}@e2e.local`
+
+  const inviteRes = await fetch(`${API_BASE}/api/users/invitations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
-    body: JSON.stringify(data),
+    body: JSON.stringify({ email, role: 'user', expiresInHours: 24 }),
   })
-  if (!res.ok)
-    throw new Error(`createTestUser ${data.username} failed: ${res.status} ${await res.text()}`)
-  const body = (await res.json()) as { data: CreatedUser }
-  return body.data
+  if (!inviteRes.ok)
+    throw new Error(
+      `createTestUser ${data.username} invite failed: ${inviteRes.status} ${await inviteRes.text()}`,
+    )
+  const { data: invitation } = (await inviteRes.json()) as { data: { code: string } }
+
+  // Accept is deliberately unauthenticated — the invitee has no account yet — so this
+  // call carries no admin token.
+  const acceptRes = await fetch(`${API_BASE}/api/auth/invitations/${invitation.code}/accept`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: data.username,
+      displayName: data.displayName,
+      email,
+      password: data.password,
+      confirmPassword: data.password,
+    }),
+  })
+  if (!acceptRes.ok)
+    throw new Error(
+      `createTestUser ${data.username} accept failed: ${acceptRes.status} ${await acceptRes.text()}`,
+    )
+  const body = (await acceptRes.json()) as { data: { user: CreatedUser } }
+  return body.data.user
 }
 
 /** Best-effort cleanup. Swallows errors so afterAll never blocks. */

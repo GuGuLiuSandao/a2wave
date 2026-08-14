@@ -67,7 +67,9 @@ test.describe('Admin: users page', () => {
 
     // Success keeps the dialog open and shows the link — that is the deliverable.
     await expect(dialog.getByText(/\/invite\//)).toBeVisible({ timeout: 5000 })
-    await dialog.getByRole('button', { name: '关闭' }).click()
+    // Two controls answer to "关闭" here — the footer button and the corner icon (aria-label).
+    // Pin the footer one by its visible text, which is the control this case is about.
+    await dialog.getByRole('button', { name: '关闭' }).filter({ hasText: '关闭' }).click()
 
     // The invitation shows up in the invitations drawer, one click from the roster.
     await page.getByRole('button', { name: '邀请记录' }).click()
@@ -86,7 +88,7 @@ test.describe('Admin: users page', () => {
     // driving the admin dialog again would only re-test the previous case.
     const token = await getAdminToken(page)
     const stamp = Date.now()
-    const res = await page.request.post(`${API_BASE}/users/invitations`, {
+    const res = await page.request.post(`${API_BASE}/api/users/invitations`, {
       headers: { Authorization: `Bearer ${token}` },
       data: { role: 'user', expiresInHours: 24 },
     })
@@ -120,13 +122,13 @@ test.describe('Admin: users page', () => {
     }
 
     // Cleanup: remove the account this test created.
-    const list = await page.request.get(`${API_BASE}/users?page=1&pageSize=100`, {
+    const list = await page.request.get(`${API_BASE}/api/users?page=1&pageSize=100`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     const body = (await list.json()) as { data: Array<{ id: string; username: string }> }
     const created = body.data.find((u) => u.username === `e2einvitee_${stamp}`)
     if (created) {
-      await page.request.delete(`${API_BASE}/users/${created.id}`, {
+      await page.request.delete(`${API_BASE}/api/users/${created.id}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
     }
@@ -136,14 +138,14 @@ test.describe('Admin: users page', () => {
     await page.goto(`${ROUTES.users}?view=invitations`)
 
     // Opened straight from the URL, with no click.
-    await expect(page.getByRole('heading', { name: '邀请记录' })).toBeVisible()
+    await expect(page.locator('.ant-drawer-title').filter({ hasText: '邀请记录' })).toBeVisible()
 
     await page.reload()
-    await expect(page.getByRole('heading', { name: '邀请记录' })).toBeVisible()
+    await expect(page.locator('.ant-drawer-title').filter({ hasText: '邀请记录' })).toBeVisible()
 
     // Closing drops the param and returns to the roster.
     await page.keyboard.press('Escape')
-    await expect(page.getByRole('heading', { name: '邀请记录' })).toBeHidden()
+    await expect(page.locator('.ant-drawer-title').filter({ hasText: '邀请记录' })).toBeHidden()
     await expect(page).not.toHaveURL(/view=invitations/)
   })
 
