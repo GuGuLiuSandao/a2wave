@@ -195,6 +195,7 @@ jobs:
       # silently never runs, so the classifier is under the same regression
       # protection as the gates.
       - run: node --test scripts/ci/__tests__/detect-changes.test.mjs
+      - run: node --test scripts/ci/__tests__/merge-latency.test.mjs
       # Pure helpers of the minVersion verifier. The verifier itself installs real
       # CLIs from npm and is deliberately NOT run here; these tests inject the
       # exec boundary, so they neither hit the network nor spawn a CLI.
