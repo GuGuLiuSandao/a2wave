@@ -27,9 +27,12 @@ import { createId } from './id.js'
 import { jsonPathIsAbsent, jsonSet } from './json-sql.js'
 import { logger } from './logger.js'
 import { appendNativeArtifactDownloadSection } from './native-chat-text.js'
+import { processInstanceId } from './process-instance.js'
 import { createScmSource } from './scm-source.js'
+import { removeOwnedSourceWorkspaceGuarded } from './scm-workspace-removal.js'
 import { notifyRunError } from './webhook-notifier.js'
 import { generateWorkLog } from './worklog-generator.js'
+import { cleanupWorkspaceOrHandOff } from './workspace-cleanup-retry.js'
 
 /** Max serialized size (chars) for a single tool_call input when persisted */
 const MAX_INPUT_JSON_LENGTH = 2000
@@ -238,9 +241,9 @@ async function cleanupFinishedExecution(
   agentId: string,
   shouldScheduleNext: boolean,
 ): Promise<void> {
-  await cleanupWorktreeIfEphemeral(runId, agentId).catch((err) =>
-    logger.warn({ err, runId }, 'Worktree ephemeral cleanup failed'),
-  )
+  await cleanupWorkspaceOrHandOff(() => cleanupWorktreeIfEphemeral(runId, agentId), {
+    context: { type: 'run', runId, agentId },
+  })
   completeExecutionLease(runId)
   if (shouldScheduleNext) {
     void scheduleNext(taskQueueDb, agentId, (rid, aid) => void executeChatRun(aid, rid))
@@ -852,5 +855,10 @@ export async function cleanupWorktreeIfEphemeral(runId: string, agentId: string)
     { runId, workDir: run.workDir, worktreeName: wtConfig.name },
     'Cleaning up ephemeral worktree',
   )
-  await scm.removeWorkspace(wtConfig.name)
+  await removeOwnedSourceWorkspaceGuarded({
+    sourceId: source.id,
+    name: wtConfig.name,
+    scm,
+    workload: { type: 'run', workloadId: runId, ownerInstanceId: processInstanceId },
+  })
 }

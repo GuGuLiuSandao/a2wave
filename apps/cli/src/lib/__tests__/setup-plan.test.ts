@@ -157,6 +157,17 @@ describe('buildComposeFile', () => {
     expect(compose).toContain('a2wave-cli-home:/home/appuser')
   })
 
+  it('persists managed SCM checkouts in a dedicated named volume', () => {
+    const compose = buildComposeFile({ image, port: DEFAULT_PORT })
+    expect(compose).toContain('a2wave-workspace:/data/workspace')
+    expect(compose).toContain('SCM_STORAGE_ROOT=${SCM_STORAGE_ROOT:-/data/workspace}')
+    expect(compose).toContain(
+      'SCM_WORKSPACES_ALLOWED_ROOTS=${SCM_WORKSPACES_ALLOWED_ROOTS:-/data/workspace/workspaces}',
+    )
+    expect(compose).not.toContain('SCM_STORAGE_ROOT=/data/workspace')
+    expect(compose).toMatch(/volumes:\n(?:.|\n)* {2}a2wave-workspace:/)
+  })
+
   it('does not leak internal-only settings (P4 / IDaaS / harbor)', () => {
     const compose = buildComposeFile({ image, port: DEFAULT_PORT })
     expect(compose).not.toMatch(/SCM_P4|IDAAS|harbor\./i)

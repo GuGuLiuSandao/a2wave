@@ -5,6 +5,7 @@ import { completeExecutionLease } from '../engine/execution-lease-registry.js'
 import { scheduleNext } from '../engine/task-queue.js'
 import { taskQueueDb } from '../engine/task-queue-db.js'
 import { logger } from './logger.js'
+import { cleanupWorkspaceOrHandOff } from './workspace-cleanup-retry.js'
 
 type TransactionRunner = <T>(callback: (tx: TransactionHandle) => Promise<T>) => Promise<T>
 
@@ -42,6 +43,22 @@ export async function persistRunTurn(
   })
 }
 
+/**
+ * Release a worktree acquired for a run that never reached its lifecycle.
+ *
+ * Must run BEFORE the caller's `settleRun` deletes or rewrites the run row:
+ * `cleanupWorktreeIfEphemeral` reads `runs.worktreeConfig` / `runs.workDir` to
+ * decide what to release, so once the row is gone it degrades to a silent
+ * no-op and the worktree leaks. `recoverRunStartup` orders `cleanup` first,
+ * which is why this belongs in that phase.
+ */
+export async function releaseEphemeralWorktree(runId: string, agentId: string): Promise<void> {
+  const { cleanupWorktreeIfEphemeral } = await import('./run-lifecycle.js')
+  await cleanupWorkspaceOrHandOff(() => cleanupWorktreeIfEphemeral(runId, agentId), {
+    context: { type: 'run', runId, agentId, phase: 'pre-execution' },
+  })
+}
+
 export type RunStartupRecoveryPhase =
   | 'cleanup'
   | 'fail-steps'
@@ -69,6 +86,10 @@ interface RecoverRunStartupDeps {
 
 const defaultRecoveryDeps: RecoverRunStartupDeps = {
   failRunSteps: (runId) => taskQueueDb.failRunSteps(runId),
+  // Releases the in-process lease AND, through the registry's durable-release
+  // handler, the SCM workload lease that pins the Agent's binding and its
+  // checkout. A substitute that only drops the in-memory entry would leave the
+  // durable one held until a sweeper reclaims it.
   releaseLease: completeExecutionLease,
   scheduleNext: async (agentId) => {
     await scheduleNext(taskQueueDb, agentId, (runId, scheduledAgentId) => {

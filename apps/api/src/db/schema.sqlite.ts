@@ -1,8 +1,5 @@
 import {
   type A2ARouteTarget,
-  PROVIDER_KINDS,
-  type RemoteSkillSource,
-  SKILL_DEFAULTS,
   type artifactPolicySchema,
   type chatAppConfigSchema,
   type discordConfigSchema,
@@ -10,6 +7,9 @@ import {
   type ghTriggerConfigSchema,
   type gitTriggerRepoStateSchema,
   type glabTriggerConfigSchema,
+  PROVIDER_KINDS,
+  type RemoteSkillSource,
+  SKILL_DEFAULTS,
   type scheduleConfigSchema,
   type slackConfigSchema,
 } from '@a2wave/shared'
@@ -356,6 +356,12 @@ export const scmSources = sqliteTable('scm_sources', {
   workspacesPath: text('workspaces_path').unique(),
   /** Whether enabled */
   isEnabled: integer('is_enabled', { mode: 'boolean' }).notNull().default(true),
+  /** Durable first phase of an SCM source deletion. */
+  deletionRequestedAt: integer('deletion_requested_at', { mode: 'timestamp' }),
+  /** User who requested deletion, retained for crash-recovery audit attribution. */
+  deletionRequestedBy: text('deletion_requested_by').references(() => users.id, {
+    onDelete: 'set null',
+  }),
   /** Owning user */
   userId: text('user_id').references(() => users.id),
   createdAt: integer('created_at', { mode: 'timestamp' })
@@ -1197,6 +1203,118 @@ export const evaluationTasks = sqliteTable(
     statusIdx: index('evaluation_tasks_status_idx').on(table.status),
   }),
 )
+
+// ============================================================
+// SCM Workload Leases - durable checkout-use reservations
+// ============================================================
+export const scmWorkloadLeases = sqliteTable(
+  'scm_workload_leases',
+  {
+    /** Stable identity: `<workloadType>:<workloadId>`. */
+    id: text('id').primaryKey(),
+    workloadType: text('workload_type', { enum: ['run', 'evaluation'] }).notNull(),
+    workloadId: text('workload_id').notNull(),
+    /** The actual executing Agent, which may differ from a Run's initiator. */
+    agentId: text('agent_id')
+      .notNull()
+      .references(() => agents.id),
+    /** Binding snapshot reserved atomically with workload admission. */
+    scmSourceId: text('scm_source_id')
+      .notNull()
+      .references(() => scmSources.id),
+    /** Reserved work may be queued; active work owns a live process/cleanup lifecycle. */
+    phase: text('phase', { enum: ['reserved', 'active'] })
+      .notNull()
+      .default('reserved'),
+    /** Process instance responsible for releasing an active lease after cleanup. */
+    ownerInstanceId: text('owner_instance_id'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => ({
+    workloadUnique: uniqueIndex('scm_workload_leases_workload_unique').on(
+      table.workloadType,
+      table.workloadId,
+    ),
+    agentIdIdx: index('scm_workload_leases_agent_id_idx').on(table.agentId),
+    scmSourceIdIdx: index('scm_workload_leases_scm_source_id_idx').on(table.scmSourceId),
+  }),
+)
+
+// ============================================================
+// SCM Workspace Removals - durable worktree-removal reservations
+// ============================================================
+/**
+ * A committed row means "this worktree is being removed right now". It is the
+ * cross-replica counterpart of the workload lease: the lease says a workload
+ * may be using a directory, this says a remover is about to delete one. Every
+ * worktree creation path, run admission (for an explicitly named worktree),
+ * path PATCH, source DELETE, and env bootstrap consults it; the two marks are
+ * both written before their action under the SCM mutation lock, so any
+ * interleaving sees at least one of them. SQLite clears leaked rows before it
+ * starts listening after a restart. PostgreSQL retains an uncertain row: age
+ * cannot prove that a peer's filesystem operation has stopped.
+ */
+export const scmWorkspaceRemovals = sqliteTable(
+  'scm_workspace_removals',
+  {
+    /** Stable target identity: `<scmSourceId>:<workspaceName>`. */
+    id: text('id').primaryKey(),
+    scmSourceId: text('scm_source_id')
+      .notNull()
+      .references(() => scmSources.id),
+    workspaceName: text('workspace_name').notNull(),
+    /**
+     * Process instance currently attempting the removal. NULL means the row was
+     * explicitly handed off — its owner exhausted its bounded retries and left
+     * the reservation for the reconciler to adopt. A non-NULL owner whose
+     * heartbeat stopped is adopted the same way; only a beating owner's
+     * reservation is left alone.
+     */
+    ownerInstanceId: text('owner_instance_id'),
+    /** Opaque attempt fence; final release must match it to avoid ABA deletion. */
+    attemptToken: text('attempt_token').notNull().default('legacy'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    /** Refreshed on every adoption, so liveness is judged per attempt, not per target. */
+    attemptStartedAt: integer('attempt_started_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => ({
+    scmSourceIdIdx: index('scm_workspace_removals_scm_source_id_idx').on(table.scmSourceId),
+    targetUnique: uniqueIndex('scm_workspace_removals_target_unique').on(
+      table.scmSourceId,
+      table.workspaceName,
+    ),
+  }),
+)
+
+// ============================================================
+// Instance Heartbeats - process liveness for cross-replica recovery
+// ============================================================
+/**
+ * One row per live API process, renewed on an interval. Liveness is what
+ * durable SCM marks (workload leases, workspace-removal reservations) cannot
+ * carry themselves: the age of a mark proves nothing — a multi-repository Git
+ * operation can outlive any timeout — but a stopped heartbeat does prove its
+ * owner is gone. `started_at` is this process's boot instant: instance ids are
+ * reused across container restarts (HOSTNAME, a pinned A2WAVE_INSTANCE_ID), so
+ * a mark written before its owner's current boot belongs to a dead previous
+ * life even while the heartbeat looks fresh.
+ */
+export const instanceHeartbeats = sqliteTable('instance_heartbeats', {
+  /** Process instance id (`processInstanceId`). */
+  id: text('id').primaryKey(),
+  /** Boot instant of the current life; overwritten when a reused id restarts. */
+  startedAt: integer('started_at', { mode: 'timestamp' }).notNull(),
+  heartbeatAt: integer('heartbeat_at', { mode: 'timestamp' }).notNull(),
+})
 
 // ============================================================
 // Evaluation Results - per-case execution result + manual review, isolated by cascade on taskId

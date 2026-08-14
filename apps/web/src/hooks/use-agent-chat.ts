@@ -9,21 +9,22 @@
  * records as the run's trigger source so chat-app traffic stays separable from
  * in-product test conversations in run history and stats.
  */
+
+import { isAttachmentImageExt } from '@a2wave/shared'
+import { useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { StreamLogEntry } from '@/hooks/use-agents'
 import { useAgentChats, useChatMessages } from '@/hooks/use-chat-history'
 import { useAttachmentConfig } from '@/hooks/use-settings'
 import { api } from '@/lib/api'
 import { historyRefToSentAttachment } from '@/lib/attachments'
 import {
-  type IdleWatchdog,
-  SseEventAccumulator,
   createIdleWatchdog,
+  type IdleWatchdog,
   interpretStreamEnd,
+  SseEventAccumulator,
 } from '@/lib/sse-stream'
-import { isAttachmentImageExt } from '@a2wave/shared'
-import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
 
 /** An attachment being composed or already uploaded (local UI state). */
 export interface PendingAttachment {

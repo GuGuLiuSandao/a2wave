@@ -43,7 +43,7 @@ import { registerPendingContext, takePendingContext } from '../lib/pending-job-r
 import { cancelRunningTasksInBackground, claimRunCancellation } from '../lib/run-cancellation.js'
 import { buildOAuthChannel, stripReservedContextKeys } from '../lib/run-channel.js'
 import { runWithLifecycle } from '../lib/run-launcher.js'
-import { persistRunTurn, recoverRunStartup } from '../lib/run-startup.js'
+import { persistRunTurn, recoverRunStartup, releaseEphemeralWorktree } from '../lib/run-startup.js'
 import {
   type GatewayCaller,
   oauthUploaderId,
@@ -499,7 +499,13 @@ app.post('/:agentId/invoke', async (c) => {
     await recoverRunStartup({
       runId,
       agentId,
-      cleanup: attachmentRootDir ? () => cleanupMaterializedRoot(attachmentRootDir) : undefined,
+      // Release the worktree in the cleanup phase: the run row survives here,
+      // but the execution lease does not, so nothing downstream would ever get
+      // around to releasing an acquired ephemeral worktree.
+      cleanup: async () => {
+        if (attachmentRootDir) await cleanupMaterializedRoot(attachmentRootDir)
+        await releaseEphemeralWorktree(runId, agentId)
+      },
       settleRun: () =>
         db
           .update(runs)

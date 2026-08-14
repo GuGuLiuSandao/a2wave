@@ -2034,6 +2034,7 @@ describe('handleMessage via dispatcher', () => {
     mockTryAcquireSlot.mockReturnValue('queue_full')
     await dispatch(makeData({ chat_type: 'p2p', message_id: 'om_qfull1' }))
     expect(mockExecuteWithRetry).not.toHaveBeenCalled()
+    expect(mockResolveWorkDir).not.toHaveBeenCalled()
     expect(mockDbDeleteRun).toHaveBeenCalled()
   })
 
@@ -2337,6 +2338,25 @@ describe('handleMessage via dispatcher', () => {
     expect(content.text).toContain('未返回有效内容')
     expect(content.text).toContain('run_id')
     expect(content.text).not.toContain('timeout')
+  })
+
+  it('resolves the current SCM workspace only after the run acquires its execution slot', async () => {
+    const currentAgent = makeAgent({ workspaceType: 'scm', scmSourceId: 'scm_current' })
+    mockDbGet.mockReturnValue(currentAgent)
+
+    await dispatch(makeData({ chat_type: 'p2p', message_id: 'om_fresh_workspace' }))
+
+    // The 4th argument is the agentEnv resolveWorkDir owns A2WAVE_WORKSPACE_BRANCH
+    // in; buildAgentConfig is mocked here, so it arrives undefined.
+    expect(mockResolveWorkDir).toHaveBeenCalledWith(currentAgent, undefined, 'run_test', undefined)
+    expect(mockResolveWorkDir.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockTryAcquireSlot.mock.invocationCallOrder[0],
+    )
+    expect(mockExecuteWithRetry).toHaveBeenCalledWith(
+      'feishu/run_test/rst_test',
+      expect.objectContaining({ workDir: '/tmp/workdir' }),
+      expect.anything(),
+    )
   })
 
   it('output 为空且没有 onBeforeReply patch 时发送 run_id 兜底回复', async () => {

@@ -17,13 +17,6 @@ import { updateCommand } from './commands/update.js'
 import { CliError } from './errors.js'
 import { getVersion } from './version.js'
 
-// Silent alias: rewrite the legacy `upgrade` to `update` without registering a
-// second entry in subCommands — avoids two identical update commands in help.
-// citty has no hidden mechanism, so this is the cleanest workaround.
-if (process.argv[2] === 'upgrade') {
-  process.argv[2] = 'update'
-}
-
 const main = defineCommand({
   meta: {
     name: 'a2wave',
@@ -57,4 +50,22 @@ export function handleError(err: unknown): never {
   throw err
 }
 
-runMain(main).catch(handleError)
+export function runCli(rawArgs: string[]): void {
+  // citty only recognizes --version when it is the sole raw argument. Preserve
+  // the documented compatibility form `a2wave setup --version` without
+  // scanning option values such as `chat send -m "--version"`.
+  if (
+    rawArgs[0] === '--version' ||
+    (rawArgs.length === 2 && rawArgs[0] === 'setup' && rawArgs[1] === '--version')
+  ) {
+    console.log(getVersion())
+    return
+  }
+
+  // Silent alias: rewrite the legacy `upgrade` to `update` without registering
+  // a duplicate command in help output.
+  const normalizedArgs = rawArgs[0] === 'upgrade' ? ['update', ...rawArgs.slice(1)] : rawArgs
+  runMain(main, { rawArgs: normalizedArgs }).catch(handleError)
+}
+
+runCli(process.argv.slice(2))

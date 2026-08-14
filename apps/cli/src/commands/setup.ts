@@ -15,6 +15,7 @@ import { createInterface } from 'node:readline/promises'
 import { defineCommand } from 'citty'
 import { loadConfig, saveConfig } from '../config.js'
 import { CliError } from '../errors.js'
+import { assertKnownOptions } from '../lib/args.js'
 import { submitInitialAdminPassword } from '../lib/initial-admin.js'
 import { readSecret } from '../lib/prompt.js'
 import {
@@ -103,6 +104,12 @@ function composeChildEnv(image: string | null, port: number | null): NodeJS.Proc
   delete env.DATABASE_URL
   // biome-ignore lint/performance/noDelete: same — see above
   delete env.POSTGRES_PASSWORD
+  // Like DATABASE_URL, these are operator-owned install settings. An exported
+  // shell value must not override the generated install's .env file.
+  // biome-ignore lint/performance/noDelete: same — see above
+  delete env.SCM_STORAGE_ROOT
+  // biome-ignore lint/performance/noDelete: same — see above
+  delete env.SCM_WORKSPACES_ALLOWED_ROOTS
   return env
 }
 
@@ -1329,6 +1336,10 @@ export const setupCommand = defineCommand({
     },
   },
   run: async (ctx) => {
+    assertKnownOptions(
+      ctx.rawArgs ?? [],
+      (ctx.cmd.args ?? {}) as Record<string, { alias?: string | string[] }>,
+    )
     const args = (ctx?.args ?? {}) as {
       dir?: string
       port?: string

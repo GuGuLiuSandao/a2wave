@@ -22,6 +22,8 @@ export type P4CheckResult = {
   ok: boolean
   message: string
   serverVersion?: string
+  clientRoot?: string
+  clientRootWarning?: string
   /** Populated for git sources — one entry per repo, so a failure names itself. */
   repos?: ScmRepoCheckResult[]
 }
@@ -29,6 +31,7 @@ export type P4CheckResult = {
 export type ProbeScmSourceInput = {
   type: ScmSourceType
   config: ScmSourceConfig
+  localPath?: string
   /**
    * Id of the source the form was loaded from, when editing. Lets the server
    * resolve credentials the form round-tripped as masked placeholders. Omitted
@@ -146,7 +149,7 @@ export function useProbeScmSource() {
 }
 
 export type ScmWorkspaceRepoInfo = {
-  directory: string // '' 表示单仓库模式的 workspace 根
+  directory: string // '' denotes the workspace root in single-repo mode
   branch: string | null
   commit: string | null
   error?: string

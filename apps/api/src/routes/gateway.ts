@@ -38,7 +38,7 @@ import {
   isRunIdempotencyConflict,
 } from '../lib/run-idempotency.js'
 import { runWithLifecycle } from '../lib/run-launcher.js'
-import { persistRunTurn, recoverRunStartup } from '../lib/run-startup.js'
+import { persistRunTurn, recoverRunStartup, releaseEphemeralWorktree } from '../lib/run-startup.js'
 import {
   type GatewayCaller,
   normalizeAuthType,
@@ -387,7 +387,14 @@ app.post('/:agentId/invoke', async (c) => {
     await recoverRunStartup({
       runId,
       agentId,
-      cleanup: attachmentRootDir ? () => cleanupMaterializedRoot(attachmentRootDir) : undefined,
+      // Release the acquired ephemeral worktree BEFORE settleRun deletes the run
+      // row: cleanupWorktreeIfEphemeral reads runs.worktreeConfig/workDir to
+      // decide, so once the row is gone it becomes a silent no-op and the
+      // worktree leaks. recoverRunStartup runs `cleanup` ahead of `settleRun`.
+      cleanup: async () => {
+        if (attachmentRootDir) await cleanupMaterializedRoot(attachmentRootDir)
+        await releaseEphemeralWorktree(runId, agentId)
+      },
       settleRun: () => db.delete(runs).where(eq(runs.id, runId)),
     })
     throw err

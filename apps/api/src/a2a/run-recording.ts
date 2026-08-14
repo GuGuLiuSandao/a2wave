@@ -5,6 +5,7 @@ import { agents, runSteps, runs } from '../db/schema.js'
 import { allTaskIdVariants } from '../engine/task-id.js'
 import { tryAcquireSlot } from '../engine/task-queue.js'
 import { taskQueueDb } from '../engine/task-queue-db.js'
+import { resolveWorkDir } from '../lib/agent-helpers.js'
 import { cleanupMaterializedRoot, materializeForRun } from '../lib/attachment-materializer.js'
 import { logAudit } from '../lib/audit.js'
 import { executeWithRetry } from '../lib/execute-with-retry.js'
@@ -225,9 +226,9 @@ export async function createRecordedA2AExecuteFn(c: Context, agent: AgentRow): P
         triggerSessionId: taskId,
         triggerUserName: channelResult.displayName,
         triggerAgentName,
-        // The workspace was resolved before this run existed (handleA2ARequest
-        // pre-flight), so record it at insert time — the workspace-delete
-        // occupancy check reads runs.workDir to spot in-flight runs.
+        // Normally empty: the workspace is resolved only after admission, and
+        // resolveWorkDir writes runs.workDir back inside its own transaction so
+        // the workspace-delete occupancy check can spot in-flight runs.
         ...(payload.workDir ? { workDir: payload.workDir } : {}),
         ...(agent.userId ? { userId: agent.userId } : {}),
       })
@@ -272,7 +273,7 @@ export async function createRecordedA2AExecuteFn(c: Context, agent: AgentRow): P
       agentId: agent.id,
       startTime,
       retries: [] as Array<{ attempt: number; error?: string; durationMs?: number }>,
-      workDir: payload.workDir,
+      workDir: '',
       userId: agent.userId ?? undefined,
     }
     let attachmentRootDir: string | null = null
@@ -281,6 +282,17 @@ export async function createRecordedA2AExecuteFn(c: Context, agent: AgentRow): P
     // preparation step inside the lifecycle boundary so any failure converges
     // the Run to a terminal state and releases the slot.
     try {
+      const currentAgent = (
+        await db.select().from(agents).where(eq(agents.id, agent.id)).limit(1)
+      )[0]
+      if (!currentAgent) throw new Error(`Agent '${agent.id}' not found after workload admission`)
+
+      // The transport-level Agent snapshot predates the durable Run and its
+      // execution lease. Re-read the binding only after admission and pass the
+      // run id so resolveWorkDir can reject a concurrent SCM binding change.
+      const resolvedWorkDir = await resolveWorkDir(currentAgent, undefined, runId)
+      lifecycleParams.workDir = resolvedWorkDir
+
       const materializedResult = await materializeForRun({
         agentId: agent.id,
         runId,
@@ -303,6 +315,7 @@ export async function createRecordedA2AExecuteFn(c: Context, agent: AgentRow): P
 
       const enrichedPayload = {
         ...payload,
+        workDir: resolvedWorkDir,
         prompt: materializedResult.mergedPrompt,
         context: { ...(payload.context ?? {}), channel },
       }

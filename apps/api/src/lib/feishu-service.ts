@@ -2174,6 +2174,15 @@ class FeishuConnectionManager {
           return
         }
 
+        const currentAgent = (
+          await db.select().from(agents).where(eq(agents.id, agentId)).limit(1)
+        )[0]
+        if (!currentAgent) throw new Error(`Agent '${agentId}' not found after workload admission`)
+        // Resolve from the binding re-read above, once the slot is held. agentEnv
+        // in: resolveWorkDir owns A2WAVE_WORKSPACE_BRANCH.
+        const env = agentConfig.agentEnv
+        const resolvedWorkDir = await resolveWorkDir(currentAgent, undefined, runId, env)
+
         let rootText = ''
         let rootImagePaths: string[] = []
         let rootFilePaths: string[] = []
@@ -2400,14 +2409,6 @@ class FeishuConnectionManager {
             .update(runs)
             .set({ triggerUserName: feishuDisplayName })
             .where(eq(runs.id, runId))
-        }
-
-        let resolvedWorkDir: string
-        try {
-          resolvedWorkDir = await resolveWorkDir(agent, undefined, runId, agentConfig.agentEnv)
-        } catch (err) {
-          await failRunAndReleaseSlot(err instanceof Error ? err.message : String(err))
-          return
         }
 
         const stepId = createId('rst')
