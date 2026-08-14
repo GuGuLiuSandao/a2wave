@@ -1,0 +1,132 @@
+# a2wave post-merge validation — the slow half of "fast PR, slow release".
+#
+# Why this is separate from ci.yml:
+# - ci.yml is the merge gate and must stay ~2 minutes. Everything here needs
+#   web+api running together (Playwright), a booted API per scenario
+#   (restart-recovery) or a full clone+install (onboarding) — minutes each.
+#   Putting them on PRs would trade the whole team's iteration speed for a
+#   signal that a daily run gives just as well.
+# - Nothing here is a required check. `all-checks-pass` in ci.yml is still the
+#   only branch-protection status; a red run here does not block merges, it
+#   tells the maintainer main needs attention.
+#
+# Why daily cron and not push-to-main: a2wave merges a handful of PRs a day, so
+# per-merge runs would mostly re-validate an unchanged tree. The cost is
+# attribution — a red run may span several commits and needs a manual bisect.
+# If merge volume grows, move `full-suite` to `push: branches: [main]` and keep
+# `cancel-in-progress: false` so every commit keeps its own result.
+#
+# No notifications by design: the maintainer reads the Actions tab. Adding an
+# auto-filed issue is the obvious next step if that stops happening.
+
+name: Post-Merge
+
+on:
+  schedule:
+    # 01:00 UTC daily — full suite.
+    - cron: '0 1 * * *'
+    # 02:00 UTC Mondays — onboarding as well (see the job's `if`).
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+    inputs:
+      run-onboarding:
+        description: Also run the onboarding (fresh-clone) E2E
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Never cancel: each run is the validation record for the main it ran against.
+concurrency:
+  group: post-merge-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────
+  # full-suite: everything `pnpm test:all` covers — unit + integration + the
+  # complete Playwright suite — plus the restart-recovery scenarios.
+  # ───────────────────────────────────────────────────────────────────────
+  full-suite:
+    name: Full Suite (unit + E2E + recovery)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # The repo's own fixture password, committed in .env.example. Not a
+      # secret: the E2E stack is a throwaway SQLite DB created per run.
+      E2E_ADMIN_PASSWORD: E2eTest123@
+    steps:
+      - uses: actions/checkout@v7
+
+      # install-scripts: better-sqlite3 builds its native addon from source;
+      # --ignore-scripts would fail every api test on a missing addon.
+      - uses: ./.github/actions/setup
+        with:
+          install-scripts: 'true'
+          build-shared: 'true'
+
+      # restart-recovery.sh exits 2 without it, after the suite has already run.
+      - name: Verify sqlite3 CLI
+        run: sqlite3 --version
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      # AUTH_SECRET must exist before anything boots the API. `pnpm dev`
+      # generates one into .env locally; CI has no .env, so write it here.
+      - name: Prepare environment
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          node scripts/ensure-auth-secret.mjs
+          echo "E2E_ADMIN_PASSWORD=${E2E_ADMIN_PASSWORD}" >> .env
+
+      # `pnpm test:all` = pnpm test && playwright test. The Playwright config
+      # starts web+api itself (webServer), waits on /api/health, and uses
+      # workers:1 + retries:2 under CI.
+      - name: Full test suite
+        run: pnpm test:all
+
+      # Separate step so a recovery failure is distinguishable from a
+      # Playwright one at a glance in the Actions tab.
+      - name: Restart-recovery scenarios
+        run: bash scripts/e2e/restart-recovery.sh
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # ───────────────────────────────────────────────────────────────────────
+  # onboarding: clones, installs and boots from scratch — the only test that
+  # sees what a newcomer sees. Weekly, because a resident working tree already
+  # has the node_modules / dist / .env a fresh clone lacks, so it only breaks
+  # when install or boot wiring changes.
+  # ───────────────────────────────────────────────────────────────────────
+  onboarding:
+    name: Onboarding E2E (fresh clone)
+    if: github.event.schedule == '0 2 * * 1' || inputs.run-onboarding
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # fetch-depth: 0 — the script clones from file://<this repo>, so the
+      # local checkout must carry the history that clone resolves.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # No ./.github/actions/setup install here on purpose: the script's whole
+      # point is running `pnpm install` itself inside the fresh clone. Only the
+      # toolchain is needed.
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Onboarding E2E
+        run: bash scripts/e2e/onboarding.sh
