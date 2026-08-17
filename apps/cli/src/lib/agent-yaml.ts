@@ -551,9 +551,26 @@ maxConcurrency: 1                         # Concurrency limit 1-5
 # showLocalChildOutput: false             # Local child Agents
 # showRemoteChildOutput: false            # Remote child Agents
 
-# Free-form config (passed through to agent.config, any structure)
+# Free-form config (passed through to agent.config, any structure).
+# REPLACED WHOLESALE, NOT MERGED: whatever this block omits is deleted from the
+# Agent. To change one value, start from the current config (a2wave agents get
+# <id> --json) rather than writing the one key you meant to edit. An apply that
+# drops keys is refused without --yes and names what it would remove.
 # config:
 #   customKey: customValue
+#
+#   # Provider chain: fallback order, up to 5 entries. Reasoning effort and fast
+#   # mode belong to a chain ENTRY, not to the Agent — the legal effort levels
+#   # follow the model, so one Agent-wide value would be invalid for at least one
+#   # entry. Omit either control to leave the CLI's own default in place.
+#   providerChain:
+#     - providerId: prv_xxxxxxxx
+#       model: gpt-5.6-sol
+#       reasoningEffort: ultra            # Discovered per model; never a fixed list (codex has ultra, Claude does not)
+#       fastMode: true                    # Only requested — the plan, model and endpoint each hold a veto
+#     - providerId: prv_yyyyyyyy          # Fallback: used when the entry above fails
+#       model: claude-opus-4-8
+#       reasoningEffort: high
 
 # Agent-level environment variables; \${ENV} placeholders are expanded by the CLI at apply time
 env:
@@ -645,7 +662,107 @@ env:
  * caller can reverse by editing again; a `write` label is honest about that,
  * and labelling every apply high-risk would train callers to pass `--yes`
  * unconditionally, which costs the protection on the cases that need it.
+ *
+ * Walks nested objects, because the freeform `config` is where the sharpest
+ * case lives: the API replaces it WHOLESALE, so a YAML naming only
+ * `providerChain` discards `timeoutMinutes`, `maxRetries` and everything else
+ * it did not repeat. Checking the top level alone read that as one edited key.
  */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * The field that identifies an array entry across an edit.
+ *
+ * Deep equality cannot serve here: a provider chain entry whose reasoning effort
+ * changed is the SAME binding, and calling it removed would gate an ordinary
+ * edit behind `--yes` while teaching the caller that the warning means nothing.
+ */
+const ENTRY_IDENTITY_KEYS = ['id', 'name', 'providerId']
+
+function entryIdentity(entry: unknown): string | null {
+  if (!isPlainObject(entry)) return null
+  for (const key of ENTRY_IDENTITY_KEYS) {
+    const value = entry[key]
+    if (typeof value === 'string' && value !== '') return value
+  }
+  return null
+}
+
+function describeArrayRemoval(
+  path: string,
+  before: unknown[],
+  next: unknown,
+  nested: boolean,
+): string | null {
+  const after = Array.isArray(next) ? next : []
+
+  // Lists of primitives — skills, mcpServerIds — compare by value, which is
+  // both exact and readable.
+  if (!before.some(isPlainObject)) {
+    const kept = new Set(after.map((entry) => JSON.stringify(entry)))
+    const removed = before.filter((entry) => !kept.has(JSON.stringify(entry)))
+    if (removed.length === 0) return null
+    // Only at the top level, where the members are ids the user picked. Reached
+    // by recursing into `config`, a member is freeform data the repo treats as
+    // secret-bearing — `agents get` prints its keys and never its values for
+    // exactly this reason — so the count is all that may be said.
+    if (nested) {
+      return `${path}: removes ${removed.length} ${removed.length === 1 ? 'entry' : 'entries'}`
+    }
+    return `${path}: removes ${removed.length} (${removed.map(String).join(', ')})`
+  }
+
+  const beforeIds = before.map(entryIdentity)
+  if (beforeIds.every((id) => id !== null)) {
+    const keptIds = new Set(after.map(entryIdentity).filter((id): id is string => id !== null))
+    const removed = beforeIds.filter((id) => !keptIds.has(id as string))
+    return removed.length > 0 ? `${path}: removes ${removed.length} (${removed.join(', ')})` : null
+  }
+
+  // Anonymous entries: length is the only honest signal, and naming them would
+  // print `[object Object]`.
+  const lost = before.length - after.length
+  return lost > 0 ? `${path}: removes ${lost} ${lost === 1 ? 'entry' : 'entries'}` : null
+}
+
+function collectRemovals(
+  path: string,
+  before: unknown,
+  next: unknown,
+  findings: string[],
+  nested = false,
+): void {
+  if (Array.isArray(before)) {
+    const finding = describeArrayRemoval(path, before, next, nested)
+    if (finding) findings.push(finding)
+    return
+  }
+
+  if (isPlainObject(before)) {
+    if (!isPlainObject(next)) {
+      if (Object.keys(before).length > 0) findings.push(`${path}: cleared`)
+      return
+    }
+    const removedKeys = Object.keys(before).filter((key) => !(key in next))
+    if (removedKeys.length > 0) {
+      const noun = removedKeys.length === 1 ? 'key' : 'keys'
+      findings.push(`${path}: removes ${removedKeys.length} ${noun} (${removedKeys.join(', ')})`)
+    }
+    for (const [key, value] of Object.entries(next)) {
+      const previous = before[key]
+      if (previous === undefined || previous === null) continue
+      collectRemovals(`${path}.${key}`, previous, value, findings, true)
+    }
+    return
+  }
+
+  // A non-empty scalar replaced by an empty one. A different non-empty value
+  // is an edit, not a loss.
+  if (before !== '' && (next === '' || next === null)) findings.push(`${path}: cleared`)
+}
+
 export function describeDestructiveDiff(
   existing: Record<string, unknown>,
   diff: Record<string, unknown>,
@@ -654,19 +771,7 @@ export function describeDestructiveDiff(
   for (const [key, next] of Object.entries(diff)) {
     const before = existing[key]
     if (before === undefined || before === null) continue
-
-    if (Array.isArray(before)) {
-      const after = new Set((Array.isArray(next) ? next : []).map((v) => JSON.stringify(v)))
-      const removed = before.filter((v) => !after.has(JSON.stringify(v)))
-      if (removed.length > 0) {
-        findings.push(`${key}: removes ${removed.length} (${removed.map(String).join(', ')})`)
-      }
-      continue
-    }
-
-    // A non-empty scalar replaced by an empty one. A different non-empty value
-    // is an edit, not a loss.
-    if (before !== '' && (next === '' || next === null)) findings.push(`${key}: cleared`)
+    collectRemovals(key, before, next, findings)
   }
   return findings
 }

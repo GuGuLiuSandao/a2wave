@@ -1,16 +1,3 @@
-import { PromptEditor } from '@/components/prompt-editor'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
-import { useAllAgents } from '@/hooks/use-agents'
-import { useCurrentUser } from '@/hooks/use-auth'
-import { useProbeModels } from '@/hooks/use-providers'
-import { resolveCollectionIcon } from '@/lib/collection-icons'
-import { selectFilterOption } from '@/lib/select-filter'
-import { findUndefinedVariables } from '@/lib/template-utils'
 import type { Agent, ProviderDto, ScmSource } from '@a2wave/shared'
 import { ADMIN_MCP_NAMES, INTERNAL_MCP_NAMES, PROVIDER_CHAIN_MAX } from '@a2wave/shared'
 import { InputNumber, Radio, Select, Tag, Tooltip } from 'antd'
@@ -36,6 +23,19 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
+import { PromptEditor } from '@/components/prompt-editor'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
+import { useAllAgents } from '@/hooks/use-agents'
+import { useCurrentUser } from '@/hooks/use-auth'
+import { useProbeModels } from '@/hooks/use-providers'
+import { resolveCollectionIcon } from '@/lib/collection-icons'
+import { selectFilterOption } from '@/lib/select-filter'
+import { findUndefinedVariables } from '@/lib/template-utils'
 import { EnvSection } from './env-section'
 import { McpServerTools, mcpServerHasToolPreview } from './mcp-server-tools'
 import {
@@ -46,9 +46,12 @@ import {
   modelProbePolicy,
   normalizeAuthMode,
   providersWithoutMcpDelivery,
+  reasoningEffortAfterModelChange,
+  reasoningEffortSelectState,
   resolveModelProbeErrorTranslation,
   visibleCredentialFieldsFor,
 } from './provider-capabilities'
+import { applyProviderEntryPatch } from './provider-chain'
 import { RouteSection } from './route-section'
 import type { AgentFormMethods, EnvEntry, ProviderChainEntry, RemoteEntry } from './types'
 import { WorkspaceSection } from './workspace-section'
@@ -408,33 +411,7 @@ export function ConfigTab({
   const updateProviderEntry = useCallback(
     (id: string, patch: Partial<ProviderChainEntry>) => {
       setProviderChainEntries((prev) =>
-        prev.map((entry) => {
-          if (entry.id !== id) return entry
-          // 凭证类字段 *或 providerId* 变化时，自动失效已 probe 的动态模型列表。
-          // providerId 监听很关键：避免切 Provider 后 UI 残留上一个 Provider 的 dynamicModels
-          // （表现为顶部"已拉取 N 个"标记不刷新）。
-          // 但 patch 显式传 dynamicModels / probeError / probing 时不覆盖（probe 流程自身用）。
-          const credChanged =
-            ('providerId' in patch && patch.providerId !== entry.providerId) ||
-            ('authMode' in patch && patch.authMode !== entry.authMode) ||
-            ('authHeaderStyle' in patch && patch.authHeaderStyle !== entry.authHeaderStyle) ||
-            ('providerBaseUrl' in patch && patch.providerBaseUrl !== entry.providerBaseUrl) ||
-            ('providerApiKey' in patch && patch.providerApiKey !== entry.providerApiKey) ||
-            ('providerOauthToken' in patch && patch.providerOauthToken !== entry.providerOauthToken)
-          const reset =
-            credChanged &&
-            !('dynamicModels' in patch) &&
-            !('probeError' in patch) &&
-            !('probing' in patch)
-          return reset
-            ? {
-                ...entry,
-                ...patch,
-                dynamicModels: undefined,
-                probeError: undefined,
-              }
-            : { ...entry, ...patch }
-        }),
+        prev.map((entry) => (entry.id === id ? applyProviderEntryPatch(entry, patch) : entry)),
       )
     },
     [setProviderChainEntries],
@@ -483,6 +460,8 @@ export function ConfigTab({
             probeError: result.error,
             probeErrorCode: result.code,
             dynamicModels: undefined,
+            modelCapabilities: undefined,
+            fastModeAvailability: undefined,
           })
         } else {
           updateProviderEntry(entry.id, {
@@ -490,6 +469,8 @@ export function ConfigTab({
             probeError: undefined,
             probeErrorCode: undefined,
             dynamicModels: result.models,
+            modelCapabilities: result.modelCapabilities,
+            fastModeAvailability: result.fastMode,
           })
         }
       } catch (e) {
@@ -498,6 +479,8 @@ export function ConfigTab({
           probeError: e instanceof Error ? e.message : String(e),
           probeErrorCode: undefined,
           dynamicModels: undefined,
+          modelCapabilities: undefined,
+          fastModeAvailability: undefined,
         })
       }
     },
@@ -825,6 +808,18 @@ export function ConfigTab({
                 }
                 return base
               })()
+              // The level set follows the MODEL, not the Provider, so it is read
+              // from this entry's probe result for whichever model is selected.
+              const effortState = reasoningEffortSelectState(
+                capabilities,
+                entry.modelCapabilities,
+                entry.model,
+              )
+              const showFastModeOption = Boolean(capabilities?.fastMode)
+              // Blocked only on a definite "no" from the vendor for these
+              // credentials. Absent availability means the question was never
+              // answered, and that is not evidence.
+              const fastModeBlocked = entry.fastModeAvailability?.available === false
               const needProbeManual = probePolicy === 'manualButton'
               const needProbeAuto = probePolicy === 'autoOnMount'
               // The auto-probe effect deliberately does not retry after a failure,
@@ -1319,7 +1314,19 @@ export function ConfigTab({
                             data-testid={`provider-chain-model-select-${index}`}
                             onChange={(val) => {
                               const next = Array.isArray(val) ? (val[val.length - 1] ?? '') : val
-                              updateProviderEntry(entry.id, { model: next })
+                              // The options follow the model on their own; the
+                              // selected level has to be re-checked against the
+                              // new model, or a level it rejects stays selected
+                              // and gets saved.
+                              updateProviderEntry(entry.id, {
+                                model: next,
+                                reasoningEffort: reasoningEffortAfterModelChange(
+                                  capabilities,
+                                  entry.modelCapabilities,
+                                  next,
+                                  entry.reasoningEffort,
+                                ),
+                              })
                               if (index === 0) setValue('model', next, { shouldDirty: true })
                             }}
                             filterOption={selectFilterOption}
@@ -1331,6 +1338,98 @@ export function ConfigTab({
                             // 让浮层走 Antd 全局 z-index，escape 局部层叠上下文。
                             getPopupContainer={() => document.body}
                           />
+                          {/* Reasoning effort sits beside the model it belongs
+                              to: the legal levels come from the model, so a
+                              chain that mixes Providers cannot share one value.
+                              Four states, because an empty dropdown means two
+                              very different things — see
+                              `reasoningEffortSelectState`. */}
+                          {effortState.kind !== 'unsupported' && (
+                            <div className="space-y-1.5 pt-1">
+                              <Label className="text-sm font-medium text-foreground">
+                                {t('agentDetail.reasoningEffort')}
+                              </Label>
+                              <Select
+                                allowClear
+                                disabled={effortState.kind !== 'options'}
+                                placeholder={
+                                  effortState.kind === 'none'
+                                    ? t('agentDetail.reasoningEffortNone')
+                                    : effortState.kind === 'unknown'
+                                      ? t('agentDetail.reasoningEffortUnknown')
+                                      : t('agentDetail.reasoningEffortPlaceholder')
+                                }
+                                value={entry.reasoningEffort || undefined}
+                                data-testid={`provider-chain-reasoning-effort-${index}`}
+                                onChange={(val) =>
+                                  updateProviderEntry(entry.id, {
+                                    reasoningEffort: (val as string | undefined) || undefined,
+                                  })
+                                }
+                                options={
+                                  effortState.kind === 'options'
+                                    ? effortState.options.map((option) => ({
+                                        value: option.value,
+                                        label:
+                                          option.value === effortState.defaultValue
+                                            ? t('agentDetail.reasoningEffortDefaultOption', {
+                                                level: option.value,
+                                              })
+                                            : option.value,
+                                        title: option.description,
+                                      }))
+                                    : []
+                                }
+                                className="w-full [&_.ant-select-selector]:!min-h-9"
+                                popupMatchSelectWidth
+                                getPopupContainer={() => document.body}
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                {effortState.kind === 'none'
+                                  ? t('agentDetail.reasoningEffortNoneDesc')
+                                  : effortState.kind === 'unknown'
+                                    ? t('agentDetail.reasoningEffortUnknownDesc')
+                                    : t('agentDetail.reasoningEffortDesc')}
+                              </p>
+                            </div>
+                          )}
+                          {/* Fast mode is a plain switch — nothing to discover.
+                              Whether a run really gets the faster path depends
+                              on the model, the plan and the endpoint, and the
+                              run reports that itself. */}
+                          {showFastModeOption && (
+                            <div className="flex items-center gap-3 pt-1">
+                              <Switch
+                                checked={Boolean(entry.fastMode)}
+                                disabled={fastModeBlocked}
+                                onCheckedChange={(checked) =>
+                                  updateProviderEntry(entry.id, { fastMode: checked })
+                                }
+                                aria-label={t('agentDetail.fastMode')}
+                                data-testid={`provider-chain-fast-mode-${index}`}
+                              />
+                              <div className="space-y-0.5">
+                                <Label className="text-sm font-medium text-foreground">
+                                  {t('agentDetail.fastMode')}
+                                </Label>
+                                <p className="text-xs text-muted-foreground">
+                                  {/* Only ever states a refusal the vendor actually
+                                      issued for these credentials. When the probe
+                                      said nothing the switch stays usable — a
+                                      failed probe must not lock out a working
+                                      feature. */}
+                                  {fastModeBlocked
+                                    ? t(
+                                        `agentDetail.fastModeBlocked.${entry.fastModeAvailability?.reason ?? 'unknown'}`,
+                                        {
+                                          defaultValue: t('agentDetail.fastModeBlocked.unknown'),
+                                        },
+                                      )
+                                    : t('agentDetail.fastModeDesc')}
+                                </p>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

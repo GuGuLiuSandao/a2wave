@@ -1,4 +1,9 @@
-import type { AuthHeaderStyle } from '@a2wave/shared'
+import type {
+  AuthHeaderStyle,
+  FastModeAvailability,
+  FastModeState,
+  ModelCapabilities,
+} from '@a2wave/shared'
 
 /**
  * Agent execution engine abstraction layer
@@ -115,7 +120,20 @@ export type StreamLogEntry =
       ts: number
     }
   | { type: 'tool_heartbeat'; callId: string; toolName: string; elapsedMs: number; ts: number }
-  | { type: 'result'; subtype: string; durationMs?: number; usage?: TokenUsage; ts: number }
+  | {
+      type: 'result'
+      subtype: string
+      durationMs?: number
+      usage?: TokenUsage
+      /**
+       * Whether the run actually got the faster path. Fast mode is only ever
+       * *requested* — the model, the account plan and the endpoint all have a
+       * veto, and the CLI settles it at run time. Absent when the engine
+       * reports nothing, which is not the same as `off`; see FastModeState.
+       */
+      fastModeState?: FastModeState
+      ts: number
+    }
   | { type: 'error'; message: string; ts: number }
   | { type: 'retry'; attempt: number; nextAttemptIn: number; ts: number }
   | { type: 'exec_params'; engine: string; params: Record<string, unknown>; ts: number }
@@ -207,6 +225,20 @@ export interface ListModelsOptions {
 export interface ModelListResult {
   /** Available model ids retrieved (populated on success, empty array on failure) */
   models: string[]
+  /**
+   * Per-model metadata, keyed by model id — today the reasoning-effort levels
+   * that model accepts and its default. Absent when the source reported none
+   * (a proxy standing in for the vendor endpoint usually returns bare ids);
+   * an entry with an EMPTY level list is the different, positive answer "this
+   * model takes no effort setting".
+   */
+  modelCapabilities?: Record<string, ModelCapabilities>
+  /**
+   * Whether these credentials may use fast mode. Absent when the engine cannot
+   * ask, or the answer did not arrive — never inferred, and never a reason to
+   * block the control.
+   */
+  fastMode?: FastModeAvailability
   /** Failure signal — a non-empty value in either field means failure */
   error?: string
   /** Failure code: 'unsupported_mode' / 'http_error' / 'no_account_models' / 'cli_failed' / 'timeout' / 'spawn_failed' / 'parse_failed' */

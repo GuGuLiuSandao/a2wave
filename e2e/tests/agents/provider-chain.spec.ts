@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test'
 import {
-  type ProviderSummary,
   createAgentWithPayload,
   deleteAgentAs,
   getAdminToken,
   getAgent,
   listProviders,
+  type ProviderSummary,
 } from '../../utils/api-helpers'
 import { loginAsAdmin } from '../../utils/auth'
 
@@ -121,6 +121,100 @@ test.describe('Agent provider chain compatibility', () => {
       expect(chain[1]?.providerApiKey ?? null).toBeNull()
       expect(after.providerId).toBe(primary.id)
       expect(after.authMode).toBe('apiKey')
+    } finally {
+      await deleteAgentAs(token, agent.id)
+    }
+  })
+
+  /**
+   * The level list is discovered per credential, and in an environment where no
+   * CLI or key is present it cannot be discovered at all — the same situation as
+   * a self-hosted proxy that reports bare model ids. A stored level must survive
+   * that: the control degrades to disabled, but saving the page must not silently
+   * drop a setting the operator configured elsewhere.
+   */
+  test('keeps a stored reasoning level and fast mode through a save that cannot probe levels', async ({
+    page,
+  }) => {
+    const token = await getAdminToken()
+    const providers = await listProviders(token)
+    const claude = providers.find((p) => p.kind === 'claude-code')
+    expect(claude, 'claude-code provider fixture').toBeTruthy()
+    if (!claude) return
+
+    const agent = await createAgentWithPayload(token, {
+      name: `e2e-reasoning-controls-${Date.now()}`,
+      type: 'cursor',
+      providerId: claude.id,
+      authMode: 'apiKey',
+      providerApiKey: 'primary-api-key',
+      config: {
+        model: enabledModel(claude),
+        providerChain: [
+          {
+            id: 'pc_primary',
+            providerId: claude.id,
+            model: enabledModel(claude),
+            authMode: 'apiKey',
+            providerApiKey: 'primary-api-key',
+            reasoningEffort: 'xhigh',
+            fastMode: true,
+            enabled: true,
+          },
+        ],
+        force: true,
+        timeoutMinutes: 10,
+        maxRetries: 2,
+      },
+    })
+
+    try {
+      await page.goto(`/agents/${agent.id}`)
+      await expect(page.getByTestId('provider-chain-item-0')).toContainText(claude.name, {
+        timeout: 8000,
+      })
+
+      // Both controls live in the entry's collapsed body — a saved chain renders
+      // every entry closed, so the row has to be opened before either exists.
+      const header = page.getByTestId('provider-chain-header-0')
+      await expect(header).toHaveAttribute('aria-expanded', 'false')
+      await header.click()
+      await expect(header).toHaveAttribute('aria-expanded', 'true')
+
+      const fastMode = page.getByTestId('provider-chain-fast-mode-0')
+      await expect(fastMode).toBeVisible()
+      await expect(fastMode).toHaveAttribute('aria-checked', 'true')
+      await expect(page.getByTestId('provider-chain-reasoning-effort-0')).toContainText('xhigh')
+
+      const save = async () => {
+        const responsePromise = page.waitForResponse(
+          (response) =>
+            response.url().includes(`/api/agents/${agent.id}`) &&
+            response.request().method() === 'PATCH',
+        )
+        await page.getByTestId('agent-detail-save').click()
+        expect((await responsePromise).ok()).toBe(true)
+        const after = await getAgent(token, agent.id)
+        const chain = (after.config?.providerChain ?? []) as Array<Record<string, unknown>>
+        return chain[0]
+      }
+
+      // Off first. Asserted as ABSENT rather than `?? false`: the serializer
+      // writes `undefined` for off, and `?? false` would read a chain that lost
+      // the field entirely as the expected result.
+      await fastMode.click()
+      await expect(fastMode).toHaveAttribute('aria-checked', 'false')
+      const afterOff = await save()
+      expect(afterOff?.reasoningEffort).toBe('xhigh')
+      expect(afterOff?.fastMode).toBeUndefined()
+
+      // Then back on, through the real UI rather than an API seed — otherwise
+      // nothing proves the switch can turn fast mode ON at all.
+      await fastMode.click()
+      await expect(fastMode).toHaveAttribute('aria-checked', 'true')
+      const afterOn = await save()
+      expect(afterOn?.fastMode).toBe(true)
+      expect(afterOn?.reasoningEffort).toBe('xhigh')
     } finally {
       await deleteAgentAs(token, agent.id)
     }

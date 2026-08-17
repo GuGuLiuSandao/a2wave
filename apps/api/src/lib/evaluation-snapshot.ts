@@ -13,9 +13,9 @@
 import type { agents } from '../db/schema.js'
 import {
   type AgentConfig,
-  type ResolvedProviderBinding,
   applyProviderBinding,
   buildAgentConfig,
+  type ResolvedProviderBinding,
 } from './agent-helpers.js'
 
 type AgentRow = typeof agents.$inferSelect
@@ -25,12 +25,26 @@ export interface EvaluationConfigSnapshot {
   /** Denormalised: still shows which provider was used after it is deleted. */
   providerName: string | null
   model: string | null
+  /**
+   * The reasoning controls of the binding that will run. They belong in the
+   * snapshot for the same reason the model does: both change what a run costs
+   * and how it answers, so replaying a set at a different level and filing the
+   * results under the same task would move a variable the comparison assumes is
+   * fixed. `null` means the task did not configure one — including tasks created
+   * before these fields existed.
+   */
+  reasoningEffort: string | null
+  fastMode: boolean | null
   systemPrompt: string
   capturedAt: Date
 }
 
 function asNullableString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null
+}
+
+function asNullableBoolean(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null
 }
 
 /**
@@ -73,7 +87,8 @@ export class EvaluationProviderUnavailableError extends Error {
 export function applyEvaluationSnapshot(
   liveConfig: AgentConfig,
   snapshot:
-    | Pick<EvaluationConfigSnapshot, 'providerId' | 'model' | 'systemPrompt'>
+    | (Pick<EvaluationConfigSnapshot, 'providerId' | 'model' | 'systemPrompt'> &
+        Partial<Pick<EvaluationConfigSnapshot, 'reasoningEffort' | 'fastMode'>>)
     | null
     | undefined,
   agent?: AgentRow,
@@ -105,10 +120,38 @@ export function applyEvaluationSnapshot(
     // snapshot provider's endpoint would disclose it to the wrong host.
     applyProviderBinding(config, pinnedChain[0])
 
-    // After applyProviderBinding, which sets model from the binding.
+    // After applyProviderBinding, which sets these from the binding.
     const model = snapshot.model ?? pinnedChain[0].model
     if (model) config.model = model
-    config.providerChain = pinnedChain.map((item) => ({ ...item, model: model ?? item.model }))
+
+    // KEY PRESENCE, not value, decides whether this snapshot has an opinion.
+    //
+    // `null` is a real answer here — "captured while the control was unset" —
+    // and `??` cannot tell it apart from a row written before these fields
+    // existed. Reading both as "inherit the live value" is a silent drift in the
+    // one direction the snapshot exists to prevent: a task queued with fast mode
+    // OFF would run WITH it if the operator flipped the Agent in between, and the
+    // results would be filed as though nothing changed. A pre-change row carries
+    // neither key and still inherits, which is what keeps those tasks running.
+    const hasEffort = 'reasoningEffort' in snapshot
+    const hasFastMode = 'fastMode' in snapshot
+    const reasoningEffort = hasEffort ? snapshot.reasoningEffort : pinnedChain[0].reasoningEffort
+    const fastMode = hasFastMode ? snapshot.fastMode : pinnedChain[0].fastMode
+
+    // Assigned rather than deleted: every consumer reads the VALUE
+    // (`typeof … === 'string'`, `=== true`), so `undefined` overrides what
+    // applyProviderBinding just set, and the key staying present is invisible.
+    config.reasoningEffort = reasoningEffort || undefined
+    config.fastMode = fastMode === true ? true : undefined
+
+    config.providerChain = pinnedChain.map((item) => ({
+      ...item,
+      model: model ?? item.model,
+      // `undefined`, never null: the binding is what the engine reads, and an
+      // unset control there means "pass nothing and take the CLI's default".
+      reasoningEffort: reasoningEffort ?? undefined,
+      fastMode: fastMode === true ? true : undefined,
+    }))
   } else if (snapshot.providerId && snapshot.providerId !== liveConfig.providerId) {
     // The snapshot provider is no longer bound to this Agent — it was unbound
     // or disabled while the task sat in the queue.
@@ -148,6 +191,8 @@ export async function buildEvaluationSnapshot(agent: AgentRow): Promise<Evaluati
     providerId: asNullableString(config.providerId),
     providerName: asNullableString(config.providerName),
     model: asNullableString(config.model),
+    reasoningEffort: asNullableString(config.reasoningEffort),
+    fastMode: asNullableBoolean(config.fastMode),
     systemPrompt,
     capturedAt: new Date(),
   }

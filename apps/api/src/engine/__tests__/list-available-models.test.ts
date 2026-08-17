@@ -867,3 +867,411 @@ describe('ClaudeCodeEngine.listAvailableModels', () => {
     expect(result.models).toEqual(['claude-opus-4-7', 'claude-sonnet-4-6'])
   })
 })
+
+// ============================================================
+// Reasoning-effort discovery
+//
+// The level set is a property of the MODEL, not of the Provider: codex
+// advertises `ultra`, Claude never does; Claude Opus 4.5 has neither `xhigh`
+// nor `max`; Haiku 4.5 accepts no effort at all. These tests pin that the
+// levels travel with the model id rather than being inferred from the kind.
+// ============================================================
+describe('reasoning effort discovery', () => {
+  const claude = new ClaudeCodeEngine({
+    path: 'claude',
+    apiKey: '',
+    baseUrl: '',
+    timeoutMinutes: 5,
+    force: false,
+    approveMcps: true,
+    defaultWorkDir: '/tmp',
+  })
+  const codex = new CodexAgentEngine({
+    path: 'codex',
+    apiKey: '',
+    timeoutMinutes: 5,
+    force: false,
+    approveMcps: true,
+    defaultWorkDir: '/tmp',
+  })
+
+  let fetchSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    mockDnsLookup.mockReset()
+    mockDnsLookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }])
+    fetchSpy = vi.spyOn(globalThis, 'fetch')
+  })
+
+  afterEach(() => {
+    fetchSpy.mockRestore()
+  })
+
+  function mockModelsResponse(body: unknown) {
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+  }
+
+  it('claude-code: carries the levels each model reports, and they differ per model', async () => {
+    mockModelsResponse({
+      data: [
+        {
+          id: 'claude-opus-4-8',
+          capabilities: {
+            effort: {
+              supported: true,
+              low: { supported: true },
+              medium: { supported: true },
+              high: { supported: true },
+              xhigh: { supported: true },
+              max: { supported: true },
+            },
+          },
+        },
+        {
+          id: 'claude-opus-4-5-20251101',
+          capabilities: {
+            effort: {
+              supported: true,
+              low: { supported: true },
+              medium: { supported: true },
+              high: { supported: true },
+              xhigh: { supported: false },
+              max: { supported: false },
+            },
+          },
+        },
+      ],
+    })
+
+    const result = await claude.listAvailableModels({
+      authMode: 'oauth',
+      oauthToken: 'sk-ant-oat01-abc',
+    })
+
+    expect(result.models).toEqual(['claude-opus-4-8', 'claude-opus-4-5-20251101'])
+    expect(result.modelCapabilities?.['claude-opus-4-8']?.reasoningEfforts).toEqual([
+      { value: 'low' },
+      { value: 'medium' },
+      { value: 'high' },
+      { value: 'xhigh' },
+      { value: 'max' },
+    ])
+    expect(
+      result.modelCapabilities?.['claude-opus-4-5-20251101']?.reasoningEfforts?.map(
+        (option) => option.value,
+      ),
+    ).toEqual(['low', 'medium', 'high'])
+  })
+
+  it('claude-code: reports an empty level list for a model that supports no effort', async () => {
+    mockModelsResponse({
+      data: [{ id: 'claude-haiku-4-5-20251001', capabilities: { effort: { supported: false } } }],
+    })
+
+    const result = await claude.listAvailableModels({
+      authMode: 'oauth',
+      oauthToken: 'sk-ant-oat01-abc',
+    })
+
+    // Empty, not absent: discovery answered the question, and the answer was "none".
+    expect(result.modelCapabilities?.['claude-haiku-4-5-20251001']?.reasoningEfforts).toEqual([])
+  })
+
+  it('claude-code: leaves capabilities unknown when a proxy returns bare model ids', async () => {
+    mockModelsResponse({ data: [{ id: 'deepseek-v4-flash' }, { id: 'internal-model' }] })
+
+    const result = await claude.listAvailableModels({
+      authMode: 'apiKey',
+      baseUrl: 'https://llm-proxy.example.com',
+      apiKey: 'sk-xxx',
+    })
+
+    expect(result.models).toEqual(['deepseek-v4-flash', 'internal-model'])
+    // Unknown must not be reported as "no levels" — the UI treats the two differently.
+    expect(result.modelCapabilities).toBeUndefined()
+  })
+
+  it('codex: carries levels, their descriptions and the model default', async () => {
+    const child = new MockChildProcess()
+    mockSpawn.mockReturnValue(child)
+    const catalog = JSON.stringify({
+      models: [
+        {
+          slug: 'gpt-5.6-sol',
+          visibility: 'list',
+          default_reasoning_level: 'low',
+          supported_reasoning_levels: [
+            { effort: 'low', description: 'Fast responses with lighter reasoning' },
+            { effort: 'ultra', description: 'Maximum reasoning with automatic task delegation' },
+          ],
+        },
+      ],
+    })
+
+    const promise = codex.listAvailableModels({ authMode: 'apiKey' })
+    settle(child, catalog, 0)
+    const result = await promise
+
+    expect(result.models).toEqual(['gpt-5.6-sol'])
+    expect(result.modelCapabilities?.['gpt-5.6-sol']).toEqual({
+      reasoningEfforts: [
+        { value: 'low', description: 'Fast responses with lighter reasoning' },
+        { value: 'ultra', description: 'Maximum reasoning with automatic task delegation' },
+      ],
+      defaultReasoningEffort: 'low',
+    })
+  })
+
+  it('codex: omits an entry for a model that reports no reasoning metadata', async () => {
+    const child = new MockChildProcess()
+    mockSpawn.mockReturnValue(child)
+    const catalog = JSON.stringify({
+      models: [{ slug: 'gpt-5.6-sol', visibility: 'list' }],
+    })
+
+    const promise = codex.listAvailableModels({ authMode: 'apiKey' })
+    settle(child, catalog, 0)
+    const result = await promise
+
+    expect(result.models).toEqual(['gpt-5.6-sol'])
+    expect(result.modelCapabilities).toBeUndefined()
+  })
+
+  it('codex: drops a level token that is not a plain lowercase word', async () => {
+    const child = new MockChildProcess()
+    mockSpawn.mockReturnValue(child)
+    const catalog = JSON.stringify({
+      models: [
+        {
+          slug: 'gpt-5.6-sol',
+          visibility: 'list',
+          supported_reasoning_levels: [{ effort: 'high' }, { effort: '--not-a-level' }],
+        },
+      ],
+    })
+
+    const promise = codex.listAvailableModels({ authMode: 'apiKey' })
+    settle(child, catalog, 0)
+    const result = await promise
+
+    expect(result.modelCapabilities?.['gpt-5.6-sol']?.reasoningEfforts).toEqual([{ value: 'high' }])
+  })
+
+  it('codex: reports unknown, not "none", when every level token is unreadable', async () => {
+    const child = new MockChildProcess()
+    mockSpawn.mockReturnValue(child)
+    const catalog = JSON.stringify({
+      models: [
+        {
+          slug: 'gpt-5.6-sol',
+          visibility: 'list',
+          supported_reasoning_levels: [{ effort: 'Very High' }, { effort: 'MAX' }],
+        },
+      ],
+    })
+
+    const promise = codex.listAvailableModels({ authMode: 'apiKey' })
+    settle(child, catalog, 0)
+    const result = await promise
+
+    // The CLI clearly HAS levels; this code just could not read its vocabulary.
+    // An empty array would tell the operator "this model takes no reasoning
+    // level" — a claim discovery never made — and grey out a usable control.
+    expect(result.modelCapabilities?.['gpt-5.6-sol']).toBeUndefined()
+  })
+
+  it('codex: clips a level description to the length the schema allows', async () => {
+    const child = new MockChildProcess()
+    mockSpawn.mockReturnValue(child)
+    const catalog = JSON.stringify({
+      models: [
+        {
+          slug: 'gpt-5.6-sol',
+          visibility: 'list',
+          supported_reasoning_levels: [{ effort: 'high', description: 'x'.repeat(400) }],
+        },
+      ],
+    })
+
+    const promise = codex.listAvailableModels({ authMode: 'apiKey' })
+    settle(child, catalog, 0)
+    const result = await promise
+
+    // The route returns the adapter result verbatim, so this slice is the only
+    // thing keeping the payload inside `reasoningEffortOptionSchema`'s max(200).
+    expect(
+      result.modelCapabilities?.['gpt-5.6-sol']?.reasoningEfforts?.[0]?.description,
+    ).toHaveLength(200)
+  })
+})
+
+/**
+ * Fast-mode eligibility is asked of an INTERNAL Anthropic endpoint, not a
+ * published contract. The whole design rests on it failing OPEN: a probe that
+ * cannot answer must leave the control usable, because the alternative is
+ * greying out a working feature on the strength of a 404. Only a definite
+ * `enabled: false` from Anthropic itself disables it.
+ */
+describe('claude-code fast mode eligibility probe', () => {
+  const claude = new ClaudeCodeEngine({
+    path: 'claude',
+    apiKey: '',
+    baseUrl: '',
+    timeoutMinutes: 5,
+    force: false,
+    approveMcps: true,
+    defaultWorkDir: '/tmp',
+  })
+
+  const MODELS_URL = 'https://api.anthropic.com/v1/models'
+  const FAST_MODE_URL = 'https://api.anthropic.com/api/claude_code_penguin_mode'
+
+  let fetchSpy: ReturnType<typeof vi.spyOn>
+  let fastModeRequests: Array<{ url: string; headers: Headers }>
+
+  beforeEach(() => {
+    mockDnsLookup.mockReset()
+    mockDnsLookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }])
+    fastModeRequests = []
+    fetchSpy = vi.spyOn(globalThis, 'fetch')
+  })
+
+  afterEach(() => {
+    fetchSpy.mockRestore()
+  })
+
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    })
+
+  /** Route by URL: the models call and the eligibility call hit the same spy. */
+  function route(fastMode: () => Promise<Response>) {
+    fetchSpy.mockImplementation(async (input: unknown, init?: unknown) => {
+      const url = String(input)
+      if (url.includes('claude_code_penguin_mode')) {
+        fastModeRequests.push({
+          url,
+          headers: new Headers((init as RequestInit | undefined)?.headers),
+        })
+        return fastMode()
+      }
+      return json({ data: [{ id: 'claude-opus-4-8' }] })
+    })
+  }
+
+  const probe = () => claude.listAvailableModels({ authMode: 'oauth', oauthToken: 'sk-ant-oat01' })
+
+  it('reports the entitlement when Anthropic grants it', async () => {
+    route(async () => json({ enabled: true }))
+
+    expect((await probe()).fastMode).toEqual({ available: true })
+  })
+
+  it('carries the refusal reason, which is what the UI shows instead of a dead switch', async () => {
+    route(async () => json({ enabled: false, disabled_reason: 'extra_usage_disabled' }))
+
+    expect((await probe()).fastMode).toEqual({
+      available: false,
+      reason: 'extra_usage_disabled',
+    })
+  })
+
+  it('clips an over-long reason rather than passing it through to the UI', async () => {
+    route(async () => json({ enabled: false, disabled_reason: 'x'.repeat(200) }))
+
+    expect((await probe()).fastMode?.reason).toHaveLength(64)
+  })
+
+  it('carries no reason when the answer is yes', async () => {
+    route(async () => json({ enabled: true, disabled_reason: 'stale field' }))
+
+    expect((await probe()).fastMode).not.toHaveProperty('reason')
+  })
+
+  it('sends the OAuth token as a bearer with the beta header the endpoint requires', async () => {
+    route(async () => json({ enabled: true }))
+
+    await probe()
+
+    expect(fastModeRequests).toHaveLength(1)
+    expect(fastModeRequests[0].headers.get('authorization')).toBe('Bearer sk-ant-oat01')
+    expect(fastModeRequests[0].headers.get('anthropic-beta')).toBe('oauth-2025-04-20')
+  })
+
+  it('stays silent on a non-200 rather than reporting the feature unavailable', async () => {
+    route(async () => json({ error: 'not found' }, 404))
+
+    const result = await probe()
+
+    // The distinction the whole probe rests on: absent means "not answered",
+    // and the switch stays usable. `available: false` would grey it out.
+    expect(result.fastMode).toBeUndefined()
+    expect(result.models).toEqual(['claude-opus-4-8'])
+  })
+
+  it('stays silent when the body omits the field it is supposed to answer with', async () => {
+    route(async () => json({ disabled_reason: 'extra_usage_disabled' }))
+
+    expect((await probe()).fastMode).toBeUndefined()
+  })
+
+  it('stays silent when the field is present but not a boolean', async () => {
+    route(async () => json({ enabled: 'true' }))
+
+    expect((await probe()).fastMode).toBeUndefined()
+  })
+
+  it('stays silent on unparseable JSON', async () => {
+    route(async () => new Response('<html>gateway</html>', { status: 200 }))
+
+    expect((await probe()).fastMode).toBeUndefined()
+  })
+
+  it('stays silent when the request throws, and still returns the models', async () => {
+    route(async () => {
+      throw new Error('ECONNRESET')
+    })
+
+    const result = await probe()
+
+    expect(result.fastMode).toBeUndefined()
+    expect(result.models).toEqual(['claude-opus-4-8'])
+  })
+
+  it('stays silent when the request times out', async () => {
+    route(async () => {
+      throw Object.assign(new Error('The operation was aborted'), { name: 'TimeoutError' })
+    })
+
+    expect((await probe()).fastMode).toBeUndefined()
+  })
+
+  it('never asks a proxy a question only Anthropic can answer', async () => {
+    route(async () => json({ enabled: true }))
+
+    const result = await claude.listAvailableModels({
+      authMode: 'apiKey',
+      baseUrl: 'https://llm-proxy.example.com',
+      apiKey: 'sk-xxx',
+    })
+
+    expect(fastModeRequests).toEqual([])
+    expect(result.fastMode).toBeUndefined()
+  })
+
+  it('asks the entitlement endpoint, which is a different path on the same host', async () => {
+    route(async () => json({ enabled: true }))
+
+    await probe()
+
+    expect(fastModeRequests[0].url).toBe(FAST_MODE_URL)
+    expect(fastModeRequests[0].url).not.toBe(MODELS_URL)
+  })
+})

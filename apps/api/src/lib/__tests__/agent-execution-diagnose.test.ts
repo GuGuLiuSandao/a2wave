@@ -32,14 +32,13 @@ vi.mock('../cli-installer.js', () => ({
 }))
 
 import type { agents } from '../../db/schema.js'
+import { asyncQuery } from '../../test/async-query.js'
 import { collectAgentExecutionChecks } from '../agent-execution-diagnose.js'
 import {
   ProviderBindingInvalidError,
   ProviderMcpUnsupportedError,
   UnusableProviderChainError,
 } from '../errors.js'
-
-import { asyncQuery } from '../../test/async-query.js'
 
 type AgentRow = typeof agents.$inferSelect
 
@@ -396,5 +395,120 @@ describe('collectAgentExecutionChecks', () => {
     )
 
     expect(checks.some((c) => c.id === 'provider_auth_mode_unsupported')).toBe(true)
+  })
+})
+
+describe('reasoning controls bound to a Provider that cannot use them', () => {
+  /**
+   * The web form clears both controls when the Provider of a chain entry
+   * changes, but an imported Agent or a direct API write can still leave a level
+   * attached to a CLI that has no such flag. It is silently dropped at run time,
+   * so diagnose is the only place the operator would ever learn about it.
+   */
+  it('warns when a reasoning level is configured on a Provider without the setting', async () => {
+    mockBuildAgentConfig.mockReturnValue({
+      engineType: 'cursor',
+      model: 'composer-1',
+      reasoningEffort: 'xhigh',
+    })
+    mockProviderGet.mockReturnValue({ id: 'prv_1', kind: 'cursor', name: 'Cursor CLI' })
+
+    const checks = await collectAgentExecutionChecks(
+      row({ id: 'a1', providerId: 'prv_1', type: 'cursor', providerApiKey: 'k' }),
+    )
+
+    const check = checks.find((c) => c.id === 'provider_reasoning_effort_unsupported')
+    expect(check?.severity).toBe('warn')
+    expect(check?.message).toContain('xhigh')
+  })
+
+  /**
+   * A control belongs to its chain entry, so a mismatch on a FALLBACK is just as
+   * real — and harder to notice, since it only bites once the primary has
+   * already failed and nobody is watching that run closely.
+   */
+  it('warns about a fallback entry, not just the bound one', async () => {
+    mockBuildAgentConfig.mockReturnValue({
+      engineType: 'claude-code',
+      model: 'claude-opus-4-8',
+      providerChain: [
+        { providerId: 'prv_1', providerKind: 'claude-code', reasoningEffort: 'high' },
+        { providerId: 'prv_2', providerKind: 'cursor', reasoningEffort: 'xhigh' },
+      ],
+    })
+    mockProviderGet.mockReturnValue({ id: 'prv_1', kind: 'claude-code', name: 'Claude Code' })
+
+    const checks = await collectAgentExecutionChecks(
+      row({ id: 'a1', providerId: 'prv_1', type: 'cursor', providerApiKey: 'k' }),
+    )
+
+    const found = checks.filter((c) => c.id === 'provider_reasoning_effort_unsupported')
+    expect(found).toHaveLength(1)
+    // Positioned, because "somewhere in the chain" is not actionable.
+    expect(found[0]?.message).toContain('chain entry 2')
+    expect(found[0]?.message).toContain('xhigh')
+  })
+
+  it('names no position when the Agent has a single binding', async () => {
+    mockBuildAgentConfig.mockReturnValue({
+      engineType: 'cursor',
+      model: 'composer-1',
+      reasoningEffort: 'xhigh',
+    })
+    mockProviderGet.mockReturnValue({ id: 'prv_1', kind: 'cursor', name: 'Cursor CLI' })
+
+    const checks = await collectAgentExecutionChecks(
+      row({ id: 'a1', providerId: 'prv_1', type: 'cursor', providerApiKey: 'k' }),
+    )
+
+    expect(
+      checks.find((c) => c.id === 'provider_reasoning_effort_unsupported')?.message,
+    ).not.toContain('chain entry')
+  })
+
+  it('warns when fast mode is on for a Provider that has no fast mode', async () => {
+    mockBuildAgentConfig.mockReturnValue({
+      engineType: 'cursor',
+      model: 'composer-1',
+      fastMode: true,
+    })
+    mockProviderGet.mockReturnValue({ id: 'prv_1', kind: 'cursor', name: 'Cursor CLI' })
+
+    const checks = await collectAgentExecutionChecks(
+      row({ id: 'a1', providerId: 'prv_1', type: 'cursor', providerApiKey: 'k' }),
+    )
+
+    expect(
+      checks.some((c) => c.id === 'provider_fast_mode_unsupported' && c.severity === 'warn'),
+    ).toBe(true)
+  })
+
+  it('stays quiet for a Provider that does support both', async () => {
+    mockBuildAgentConfig.mockReturnValue({
+      engineType: 'claude-code',
+      model: 'claude-opus-4-8',
+      reasoningEffort: 'xhigh',
+      fastMode: true,
+    })
+    mockProviderGet.mockReturnValue({ id: 'prv_1', kind: 'claude-code', name: 'Claude Code' })
+
+    const checks = await collectAgentExecutionChecks(
+      row({ id: 'a1', providerId: 'prv_1', type: 'cursor', providerApiKey: 'k' }),
+    )
+
+    expect(checks.some((c) => c.id === 'provider_reasoning_effort_unsupported')).toBe(false)
+    expect(checks.some((c) => c.id === 'provider_fast_mode_unsupported')).toBe(false)
+  })
+
+  it('stays quiet when neither control is configured', async () => {
+    mockBuildAgentConfig.mockReturnValue({ engineType: 'cursor', model: 'composer-1' })
+    mockProviderGet.mockReturnValue({ id: 'prv_1', kind: 'cursor', name: 'Cursor CLI' })
+
+    const checks = await collectAgentExecutionChecks(
+      row({ id: 'a1', providerId: 'prv_1', type: 'cursor', providerApiKey: 'k' }),
+    )
+
+    expect(checks.some((c) => c.id === 'provider_reasoning_effort_unsupported')).toBe(false)
+    expect(checks.some((c) => c.id === 'provider_fast_mode_unsupported')).toBe(false)
   })
 })

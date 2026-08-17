@@ -1,9 +1,8 @@
-import { api } from '@/lib/api'
-import type { ChatConnectionMaps, ConnectedChannelKey } from '@/lib/channel-connection-ui'
 import type {
   Agent,
   AgentPermission,
   CreateAgentInput,
+  FastModeState,
   GitTriggerCliStatus,
   GitTriggerConfig,
   GitTriggerProvider,
@@ -11,6 +10,8 @@ import type {
 } from '@a2wave/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useRef, useState } from 'react'
+import { api } from '@/lib/api'
+import type { ChatConnectionMaps, ConnectedChannelKey } from '@/lib/channel-connection-ui'
 
 const AGENTS_KEY = ['agents'] as const
 /** 供诊断等场景手动 invalidate */
@@ -500,6 +501,8 @@ export type StreamLogEntry =
       type: 'result'
       subtype: string
       durationMs?: number
+      /** The engine's verdict on fast mode; absent when it reported none. */
+      fastModeState?: FastModeState
       usage?: {
         inputTokens?: number
         outputTokens?: number
