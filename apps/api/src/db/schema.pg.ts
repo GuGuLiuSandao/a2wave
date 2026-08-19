@@ -15,6 +15,7 @@ import {
   type gitTriggerRepoStateSchema,
   type glabTriggerConfigSchema,
   PROVIDER_KINDS,
+  type qqOfficialConfigSchema,
   type RemoteSkillSource,
   SKILL_DEFAULTS,
   type scheduleConfigSchema,
@@ -538,7 +539,7 @@ export const agents = pgTable(
      * otherwise. Changing a SQLite column default requires a full table rebuild, which for this
      * table is unsafe under the live foreign keys `db/client.ts` enables (see 0100's header).
      *
-     * ⚠️ **This default is not inert.** Drizzle binds it into every INSERT as a parameter, so
+     * ! **This default is not inert.** Drizzle binds it into every INSERT as a parameter, so
      * omitting the column from an insert writes `'feishu_scope'` — it does not fall through to
      * SQLite. Reads normalize that to the *open* mode, so an insert path that forgets this
      * column silently downgrades an Agent's access tier to "all enterprise users". The clone
@@ -579,6 +580,8 @@ export const agents = pgTable(
     slackConfig: jsonb('slack_config').$type<z.input<typeof slackConfigSchema>>(),
     /** Discord Gateway bot configuration JSON. */
     discordConfig: jsonb('discord_config').$type<z.input<typeof discordConfigSchema>>(),
+    /** QQ Official Bot WebSocket Gateway configuration JSON. */
+    qqOfficialConfig: jsonb('qq_official_config').$type<z.input<typeof qqOfficialConfigSchema>>(),
     /** Chat app page presentation config JSON (copy only — never credentials). */
     chatAppConfig: jsonb('chat_app_config').$type<z.input<typeof chatAppConfigSchema>>(),
     /** Artifact distribution policy JSON */
@@ -678,6 +681,8 @@ export const runs = pgTable(
       oauthEngineType?: string
       oauthPreviousChatId?: string
       oauthResetSession?: boolean
+      /** Native chat command requested a new provider conversation for this turn. */
+      nativeChatResetSession?: boolean
       /**
        * Attachment refs for the queued path (persisted, so they are not lost to TTL expiry or a
        * restart the way an in-memory-only pending context would be).
@@ -742,9 +747,9 @@ export const runs = pgTable(
          */
         queued?: boolean
       }
-      /** Persisted Slack/Discord context for queued and restart execution. */
+      /** Persisted native chat context for queued and restart execution. */
       nativeChatContext?: Record<string, unknown>
-      /** Durable remote identifiers resolved only after native event reservation/acknowledgement. */
+      /** Durable vendor identifiers resolved only after native event reservation/acknowledgement. */
       nativeAttachments?: (
         | {
             source: 'slack'
@@ -772,6 +777,7 @@ export const runs = pgTable(
         'feishu',
         'slack',
         'discord',
+        'qq_official',
         'a2a',
         'schedule',
         'oauth',
@@ -851,7 +857,9 @@ export const runs = pgTable(
       ),
     nativeChatEventUnique: uniqueIndex('runs_native_chat_event_unique')
       .on(table.initiatorAgentId, table.triggerSource, table.triggerEventId)
-      .where(sql`trigger_source IN ('slack', 'discord') AND trigger_event_id IS NOT NULL`),
+      .where(
+        sql`trigger_source IN ('slack', 'discord', 'qq_official') AND trigger_event_id IS NOT NULL`,
+      ),
     userIdIdx: index('runs_user_id_idx').on(table.userId),
     // Per-agent time series (GET /agents/:id/stats/timeseries): every query is
     // `initiator_agent_id = ? AND created_at BETWEEN ? AND ?`. The single-column

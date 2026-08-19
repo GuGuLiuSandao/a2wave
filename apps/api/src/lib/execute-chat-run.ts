@@ -20,11 +20,15 @@ import { WorktreeBranchLockedError, WorktreeDirtyError } from './git-workspace.j
 import { createId } from './id.js'
 import { logger } from './logger.js'
 import { resolveNativeChatAttachments } from './native-chat-attachments.js'
+import { isNativeChatChannel } from './native-chat-channel.js'
 import { lookupPreviousOAuthSessionChatId } from './oauth-session.js'
 import { sweepPendingContexts, takePendingContext, takePendingJob } from './pending-job-registry.js'
 import { retryUntilSuccess } from './retry-until-success.js'
 import { runWithLifecycle } from './run-launcher.js'
 import { cleanupWorkspaceOrHandOff } from './workspace-cleanup-retry.js'
+
+const QQ_C2C_SESSION_TIMEOUT_MS = 2 * 60 * 60 * 1000
+const QQ_GROUP_SESSION_TIMEOUT_MS = 8 * 60 * 60 * 1000
 
 /**
  * Execute a chat run (used for both immediate execution and queued run scheduling).
@@ -501,7 +505,8 @@ async function resolveQueuedChatId(run: typeof runs.$inferSelect): Promise<strin
     )
   }
 
-  if (run.triggerSource !== 'slack' && run.triggerSource !== 'discord') return undefined
+  if (!isNativeChatChannel(run.triggerSource)) return undefined
+  if (run.executionMetadata?.nativeChatResetSession === true) return undefined
   const previous = (
     await db
       .select({ result: runs.result })
@@ -518,6 +523,48 @@ async function resolveQueuedChatId(run: typeof runs.$inferSelect): Promise<strin
       .orderBy(desc(runs.createdAt))
       .limit(1)
   )[0]
+  if (run.triggerSource === 'qq_official') {
+    const scene = getQQOfficialScene(run.executionMetadata?.nativeChatContext)
+    const timeoutMs =
+      scene === 'c2c'
+        ? QQ_C2C_SESSION_TIMEOUT_MS
+        : scene === 'group'
+          ? QQ_GROUP_SESSION_TIMEOUT_MS
+          : undefined
+    if (timeoutMs !== undefined) {
+      const latestActivity = (
+        await db
+          .select({ createdAt: runs.createdAt })
+          .from(runs)
+          .where(
+            and(
+              eq(runs.initiatorAgentId, run.initiatorAgentId),
+              eq(runs.triggerSource, run.triggerSource),
+              eq(runs.triggerSessionId, run.triggerSessionId),
+              lt(runs.createdAt, run.createdAt),
+            ),
+          )
+          .orderBy(desc(runs.createdAt))
+          .limit(1)
+      )[0]
+      if (
+        latestActivity?.createdAt instanceof Date &&
+        run.createdAt.getTime() - latestActivity.createdAt.getTime() > timeoutMs
+      ) {
+        return undefined
+      }
+    }
+  }
   const chatId = previous?.result?.chatId
   return typeof chatId === 'string' ? chatId : undefined
+}
+
+function getQQOfficialScene(context: unknown): 'c2c' | 'group' | undefined {
+  if (!context || typeof context !== 'object') return undefined
+  const channel = (context as { channel?: unknown }).channel
+  if (!channel || typeof channel !== 'object') return undefined
+  const info = (channel as { channel_info?: unknown }).channel_info
+  if (!info || typeof info !== 'object') return undefined
+  const scene = (info as { scene?: unknown }).scene
+  return scene === 'c2c' || scene === 'group' ? scene : undefined
 }
