@@ -174,7 +174,17 @@ export const taskQueueDb: TaskQueueDb = {
           }
           const updated = await executor
             .update(runs)
-            .set({ status: slot === 'acquired' ? 'running' : 'queued', updatedAt: new Date() })
+            .set({
+              status: slot === 'acquired' ? 'running' : 'queued',
+              // Stamp on acquisition, clear on queue. This is the primary
+              // admission path, so without the stamp most runs would carry no
+              // owner and the reaper could never settle them. Clearing on the
+              // queued branch matters just as much: a conversation run row is
+              // reused across turns, and a leftover owner from an earlier turn
+              // would make a legitimately queued run look abandoned.
+              ownerInstanceId: slot === 'acquired' ? processInstanceId : null,
+              updatedAt: new Date(),
+            })
             .where(eq(runs.id, runId))
             .returning({ id: runs.id })
           if (updated.length === 0) {
@@ -231,7 +241,11 @@ export const taskQueueDb: TaskQueueDb = {
       if ((await countOccupiedRunSlots(tx, agentId)) >= maxConcurrency) return false
       const changed = await tx
         .update(runs)
-        .set({ status: 'running', updatedAt: new Date() })
+        // Stamp ownership with the status: a temp-workspace run takes no
+        // durable lease, so this column is the only mark proving who is
+        // executing it — and the only way the reaper can tell a crashed
+        // owner's row from a healthy peer's.
+        .set({ status: 'running', ownerInstanceId: processInstanceId, updatedAt: new Date() })
         .where(and(eq(runs.id, runId), eq(runs.status, 'queued')))
         .returning({ id: runs.id })
       if (changed.length === 0) return false
@@ -265,7 +279,14 @@ export const taskQueueDb: TaskQueueDb = {
     // form that means the same thing on both backends.
     const changed = await db
       .update(runs)
-      .set({ status: toStatus, updatedAt: new Date() })
+      // Claiming for execution stamps ownership; other transitions leave it
+      // alone. Terminal rows keep the owner that ran them — settlement is by
+      // status, so a stale value there can never be acted on.
+      .set({
+        status: toStatus,
+        updatedAt: new Date(),
+        ...(toStatus === 'running' ? { ownerInstanceId: processInstanceId } : {}),
+      })
       .where(and(eq(runs.id, runId), eq(runs.status, fromStatus)))
       .returning({ id: runs.id })
     return changed.length > 0
