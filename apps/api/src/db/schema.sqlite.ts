@@ -1530,3 +1530,120 @@ export const gitTriggerStates = sqliteTable(
     pk: primaryKey({ columns: [table.agentId, table.channel, table.repoKey] }),
   }),
 )
+
+// ============================================================
+// Device authorizations — RFC 8628 device grant for headless `a2wave login`
+// ============================================================
+/**
+ * One row per `a2wave login` started on a machine that cannot host the loopback
+ * SSO callback (SSH, container, CI). The CLI polls with the device code while
+ * the user approves the matching user code in a browser that already has a
+ * session; approval binds the row to that user and the next poll claims a token.
+ *
+ * The device code is a bearer credential for token issuance, so only its SHA-256
+ * is stored — a database read must not yield something that can be replayed
+ * against POST /auth/device/token. The user code is stored in the clear because
+ * the approver has to read it off their terminal and match it on screen; it is
+ * short-lived, single-use, and only actionable by an already-authenticated user.
+ */
+export const deviceAuthorizations = sqliteTable(
+  'device_authorizations',
+  {
+    id: text('id').primaryKey(), // dev_xxx
+    /** SHA-256 (hex) of the device code. The plaintext never touches the database. */
+    deviceCodeHash: text('device_code_hash').notNull().unique(),
+    /**
+     * Human-transcribed code, uppercase Crockford-style alphabet with I/O/U/0/1
+     * removed so it survives being read aloud or retyped. Unique because approval
+     * looks it up directly; collisions are retried at generation time.
+     */
+    userCode: text('user_code').notNull().unique(),
+    /**
+     * pending → approved → claimed is the success path. `claimed` is terminal and
+     * makes the device code single-use: a replay after the CLI has taken its token
+     * is indistinguishable from a stolen code, so it is refused rather than served.
+     */
+    status: text('status', { enum: ['pending', 'approved', 'denied', 'claimed'] })
+      .notNull()
+      .default('pending'),
+    /** Approver; null while pending. Deleting the user must not erase the audit trail. */
+    userId: text('user_id').references(() => users.id, { onDelete: 'set null' }),
+    /**
+     * Where the login was started, captured at request time and shown on the
+     * approve page. This is the only signal the approver has to tell their own
+     * remote shell apart from an attacker who phoned them a code, so it is
+     * recorded even though nothing else reads it.
+     */
+    clientIp: text('client_ip'),
+    userAgent: text('user_agent'),
+    /** Expiry is enforced on read; a lapsed row is treated as expired regardless of status. */
+    expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+    /** Drives the RFC 8628 `slow_down` response when a client polls faster than `interval`. */
+    lastPolledAt: integer('last_polled_at', { mode: 'timestamp' }),
+    approvedAt: integer('approved_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => ({
+    // The expiry sweep scans by expires_at; without this it is a full scan of a
+    // table that takes a row per login attempt.
+    expiresAtIdx: index('device_authorizations_expires_at_idx').on(table.expiresAt),
+  }),
+)
+
+// ============================================================
+// CLI tokens — long-lived, individually revocable API credentials
+// ============================================================
+/**
+ * A named bearer credential a user creates in the web UI and pastes into a CLI
+ * or CI job.
+ *
+ * Distinct from a session JWT on purpose. A session token is short-lived, tied
+ * to `users.tokenVersion`, and revoked wholesale when that bumps — which is
+ * right for a browser but wrong for automation, where a password change would
+ * silently break every pipeline. These are stored server-side so each one can be
+ * named, listed, and revoked on its own, and given a lifetime measured in days
+ * rather than the session TTL.
+ *
+ * Only the SHA-256 is persisted. The plaintext is shown once at creation and is
+ * unrecoverable afterwards: a database read must not yield a working credential.
+ */
+export const cliTokens = sqliteTable(
+  'cli_tokens',
+  {
+    id: text('id').primaryKey(), // clt_xxx
+    /** SHA-256 (hex) of the token. The plaintext never touches the database. */
+    tokenHash: text('token_hash').notNull().unique(),
+    /**
+     * Short prefix of the plaintext, shown in the list so a user can tell two
+     * tokens apart without being able to reconstruct either.
+     */
+    tokenPrefix: text('token_prefix').notNull(),
+    /** User-supplied label ("CI runner", "laptop"). The only way to identify one later. */
+    name: text('name').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /**
+     * Null means no expiry. Deliberately allowed: a CI credential that silently
+     * dies mid-quarter is worse than one an admin can see and revoke, and the
+     * list surfaces age precisely so it stays visible.
+     */
+    expiresAt: integer('expires_at', { mode: 'timestamp' }),
+    /**
+     * Stamped on use, best-effort. This is what makes an unused token
+     * identifiable — without it nobody can tell which credentials are safe to
+     * revoke, and they accumulate forever.
+     */
+    lastUsedAt: integer('last_used_at', { mode: 'timestamp' }),
+    revokedAt: integer('revoked_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => ({
+    // The list is per-user and ordered newest first.
+    userIdIdx: index('cli_tokens_user_id_idx').on(table.userId),
+  }),
+)

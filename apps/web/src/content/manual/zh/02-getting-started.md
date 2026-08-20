@@ -23,6 +23,50 @@ curl -X POST http://localhost:3502/api/auth/setup \
 > [!IMPORTANT]
 > a2wave 是企业级平台：**不支持匿名调用、不跳过认证**。
 
+### 在命令行登录
+
+先告诉 CLI 你的实例地址，再登录：
+
+```bash
+a2wave config set-url https://a2wave.example.com
+a2wave login
+```
+
+在本机，`a2wave login` 会直接拉起浏览器完成 SSO。
+
+**在远程机器上**（SSH、容器、CI）没有可用的浏览器，`a2wave login` 会自动改用**设备码登录**：终端显示一个验证码，你在任意一台已登录 a2wave 的机器上打开提示的页面，输入验证码并确认，终端就会自动完成登录。
+
+```
+  Open this page:  https://a2wave.example.com/device
+  Enter this code: WDJB-MJHT
+
+  Waiting for approval… (Ctrl-C to cancel)
+```
+
+容器与 CI 不会被自动识别，可以显式指定：`a2wave login --device`。
+
+> [!WARNING]
+> **绝不要批准别人发给你的验证码。** 批准即代表那台设备可以用你的身份登录。确认页会显示发起登录的 IP、客户端和时间——只有当这次登录确实是你自己发起的，才点批准。验证码 10 分钟内有效，且只能使用一次。
+
+### 用命令行令牌登录（CI / 无人值守）
+
+设备码登录需要有人点一下批准，CI 里没有人。这种场景用**命令行令牌**：在「设置 → CLI 访问」里创建一个，起个名字（比如 `CI runner`），选好有效期，复制下来。
+
+> [!WARNING]
+> **令牌只显示这一次**，关掉就再也拿不到了。请立刻存进你的密钥管理里。
+
+```bash
+a2wave config set-url https://a2wave.example.com
+a2wave login --token a2wc_xxxxxxxxxxxx
+```
+
+令牌拥有**创建者的全部权限**，不能单独缩小范围（唯一的例外：令牌不能用来再创建令牌，那需要真正登录）。所以建议**一台机器 / 一个任务一个令牌**——万一泄漏，只删掉那一个就行，不影响其他地方。
+
+> [!IMPORTANT]
+> 管理员创建的令牌会继承管理员权限，包括重置他人密码。给自动化用的令牌，建议用普通账号创建。
+
+在同一个页面可以看到每个令牌的**最近使用时间**，据此判断哪些已经没人用了，可以删掉。删除立即生效。
+
 ## 五分钟上手
 
 1. **配置 Provider**：进入「Providers」，在预设的 **Claude Code / Cursor CLI / Codex CLI / OpenCode CLI / Qoder CLI / Trae CLI / Kimi Code CLI / Pi CLI** 中选一个。凭证与模型配置在 Agent 上：填入凭证（API Key 或 OAuth，或使用服务器登录态）后点「拉取模型」并选择。详见 [Provider 执行引擎](/wiki/providers)。

@@ -521,6 +521,9 @@
     "skillFolderNoMd": "文件夹中未找到 SKILL.md，无法创建 Skill"
   },
   "apiError": {
+    "DEVICE_REQUEST_NOT_FOUND": "该验证码已过期或已被使用，请在终端重新发起登录。",
+    "INVALID_USER_CODE": "验证码无效，请检查后重试。",
+    "PUBLIC_BASE_URL_NOT_SET": "设备登录需要配置对外访问地址，请联系管理员在设置中填写。",
     "SCM_INITIAL_SYNC_REQUIRED": "该代码源尚未完成初次同步，无法被 Agent 使用",
     "INVALID_CREDENTIALS": "用户名或密码错误",
     "ACCOUNT_DISABLED": "账号已被禁用",
@@ -1110,7 +1113,8 @@
       "attachments": "上传附件",
       "branding": "品牌外观",
       "webhook": "通知 Webhook",
-      "auth": "企业登录"
+      "auth": "企业登录",
+      "cli": "CLI 访问"
     },
     "faviconRemove": "移除图标",
     "faviconUpload": "上传图标"
@@ -2269,6 +2273,10 @@
       "agent.update": "更新 Agent",
       "artifact.delete": "删除产物",
       "auth.change-password": "修改密码",
+      "auth.device.approved": "批准设备登录",
+      "auth.device.claimed": "设备登录已签发令牌",
+      "auth.device.denied": "拒绝设备登录",
+      "auth.device.requested": "设备登录请求",
       "auth.login": "登录",
       "auth.logout": "退出登录",
       "auth.oauth.exchange_failed": "企业身份换取令牌失败",
@@ -2280,6 +2288,8 @@
       "auth.setup.completed": "完成初始管理员设置",
       "auth.share.access_denied": "分享访问被拒绝",
       "auth.share.access_granted": "分享访问已放行",
+      "cli_token.created": "创建 CLI 令牌",
+      "cli_token.revoked": "吊销 CLI 令牌",
       "data_retention.sweep": "数据保留清理",
       "evaluation_case.create": "创建评测用例",
       "evaluation_case.delete": "删除评测用例",
@@ -2352,7 +2362,9 @@
     "resources": {
       "agent": "Agent",
       "artifact": "产物",
+      "cli_token": "CLI 令牌",
       "data_retention": "数据保留",
+      "device_authorization": "设备登录请求",
       "evaluation_case": "评测用例",
       "evaluation_result": "评测结果",
       "evaluation_set": "评测集",
@@ -2548,5 +2560,67 @@
         "desc": "此链接对应的账号已创建，请直接登录。"
       }
     }
+  },
+  "device": {
+    "title": "授权设备登录",
+    "desc": "输入终端里显示的验证码，为那台机器完成 a2wave 登录。",
+    "codeLabel": "设备验证码",
+    "codePlaceholder": "XXXX-XXXX",
+    "continue": "继续",
+    "confirmTitle": "确认授权此次登录？",
+    "confirmDesc": "有设备正在请求以你的身份登录。只有当这次登录确实由你发起时才批准。",
+    "requestedFrom": "请求来源",
+    "client": "客户端",
+    "requestedAt": "请求时间",
+    "unknownAddress": "地址未知",
+    "unknownClient": "客户端未知",
+    "approve": "批准",
+    "deny": "拒绝",
+    "approved": "设备已授权",
+    "approvedDesc": "回到终端，登录会自动继续。",
+    "denied": "已拒绝设备登录",
+    "deniedDesc": "该设备未登录，可以关闭本页面。",
+    "warning": "绝不要批准别人发给你的验证码。",
+    "invalidCode": "验证码无效，请检查后重试。",
+    "notFound": "该验证码已过期或已被使用，请在终端重新发起登录。"
+  },
+  "cli": {
+    "title": "CLI 访问",
+    "desc": "供 a2wave CLI、CI 任务和脚本使用的长期令牌，每个都可以单独吊销。",
+    "create": "新建令牌",
+    "createTitle": "创建 CLI 令牌",
+    "name": "名称",
+    "namePlaceholder": "这个令牌给谁用？例如：CI runner",
+    "nameRequired": "必须填名称——这是之后区分令牌的唯一方式。",
+    "expiry": "有效期",
+    "expiryNever": "永不过期",
+    "expiryDays": "{{count}} 天",
+    "expiryHint": "不设过期时间的令牌会一直有效，直到你手动吊销。",
+    "created": "令牌已创建",
+    "createdWarning": "请立即复制——它不会再次显示。",
+    "copy": "复制",
+    "copied": "已复制",
+    "done": "完成",
+    "empty": "还没有 CLI 令牌。",
+    "colName": "名称",
+    "colLastUsed": "最近使用",
+    "colExpires": "过期时间",
+    "never": "从未使用",
+    "sessionTtl": "会话令牌有效期",
+    "sessionTtlValue": "{{days}} 天",
+    "sessionTtlHint": "适用于浏览器登录和登录签发的令牌，<b>不适用于</b>上面的 CLI 令牌——后者用你创建时选的有效期。由环境变量 AUTH_SESSION_TTL_DAYS 设置，改后需重启；出于安全考虑刻意不放在页面上修改。",
+    "createDesc": "令牌只在创建后显示这一次。",
+    "nameHint": "用于之后识别这个令牌，建议填机器名或任务名。",
+    "colStatus": "状态",
+    "deleteTitle": "确定删除这个令牌？",
+    "deleteContent": "「{{name}}」会立即失效，正在使用它的地方将无法访问。",
+    "status": {
+      "active": "生效中",
+      "revoked": "已删除",
+      "expired": "已过期"
+    },
+    "pageDesc": "供 a2wave CLI、CI 任务和脚本使用的令牌。每个都只属于你，可以单独删除。",
+    "submit": "创建令牌",
+    "copyFailed": "复制失败，请手动选中令牌复制。"
   }
 }

@@ -32,6 +32,7 @@ import { backfillWorkspacesPaths } from './lib/backfill-workspaces-path.js'
 import { bootstrapFromEnv } from './lib/bootstrap.js'
 import { ensureInstallRootOnPath, recoverInterruptedInstalls } from './lib/cli-installer.js'
 import { startDataRetentionSweeper } from './lib/data-retention.js'
+import { startDeviceAuthorizationSweeper } from './lib/device-authorization-sweep.js'
 import { discordConnectionManager } from './lib/discord-service.js'
 import { AppError } from './lib/errors.js'
 import { executeChatRun } from './lib/execute-chat-run.js'
@@ -81,9 +82,11 @@ import artifactsRoutes from './routes/artifacts.js'
 import attachmentsRoutes from './routes/attachments.js'
 import auditLogsRoutes from './routes/audit-logs.js'
 import authRoutes from './routes/auth.js'
+import authDeviceRoutes from './routes/auth-device.js'
 import authOidcRoutes from './routes/auth-oidc.js'
 import authSamlRoutes from './routes/auth-saml.js'
 import changelogRoutes from './routes/changelog.js'
+import cliTokenRoutes from './routes/cli-tokens.js'
 import docsRoutes from './routes/docs.js'
 import e2eRoutes from './routes/e2e.js'
 import evaluationRoutes, {
@@ -235,10 +238,32 @@ app.use('/api/auth/logout', authMiddleware)
 // 标准 SSO 登录（OIDC / SAML）：公开未鉴权的浏览器跳转流，回调触发验签 + 建号，限流
 app.use('/api/auth/oidc/*', authRateLimit)
 app.use('/api/auth/saml/*', authRateLimit)
+// Device grant: /code and /token are public by necessity — the calling machine has no
+// credential yet. Both are rate limited, but NOT on the shared auth bucket: one login
+// polls every 5s, so a single session spends ~13 requests/min of authRateLimit's 30,
+// and two concurrent logins behind one NAT egress IP (an office, a CI fleet) would
+// 429 each other out of a login that was about to succeed. Sized for the poll loop
+// instead, while still bounding table growth and device-code guessing.
+const deviceLoginRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 120,
+  trustProxy: env.TRUSTED_PROXY,
+  trustedProxyAddresses: env.TRUSTED_PROXY_ADDRESSES.split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+})
+// The browser half (/pending, /approve, /deny) decides on behalf of a real user, so it
+// requires a session like any other authenticated route.
+app.use('/api/auth/device/code', deviceLoginRateLimit)
+app.use('/api/auth/device/token', deviceLoginRateLimit)
+app.use('/api/auth/device/pending', authMiddleware)
+app.use('/api/auth/device/approve', authMiddleware)
+app.use('/api/auth/device/deny', authMiddleware)
 // 邀请注册：公开未鉴权（受邀人此时还没有账号），且 accept 会建号 + Argon2 哈希（CPU 放大），
 // code 又是 URL 里的 bearer 凭据，必须限流，否则可被枚举探测。
 app.use('/api/auth/invitations/*', authRateLimit)
 app.route('/api/auth/invitations', publicInvitationRoutes)
+app.route('/api/auth/device', authDeviceRoutes)
 app.route('/api/auth/oidc', authOidcRoutes)
 app.route('/api/auth/saml', authSamlRoutes)
 app.route('/api/auth', authRoutes)
@@ -248,6 +273,12 @@ if (env.NODE_ENV === 'development' && env.E2E_STRICT_AUTH) {
   app.use('/api/e2e', authMiddleware, requireAdmin)
   app.route('/api/e2e', e2eRoutes)
 }
+
+// CLI tokens are personal credentials: every route is scoped to the caller, so a
+// normal session guard is the whole authorization model.
+app.use('/api/cli-tokens', authMiddleware)
+app.use('/api/cli-tokens/*', authMiddleware)
+app.route('/api/cli-tokens', cliTokenRoutes)
 
 // --- Protected routes (require auth) ---
 app.use('/api/agents/*', (c, next) => {
@@ -710,6 +741,10 @@ void ensureAdminExists()
     // Daily history retention: prune terminal runs (+cascaded steps/messages) and
     // audit logs older than settings.dataRetention.retentionDays (default 60).
     startDataRetentionSweeper()
+    // Device-login rows die 10 minutes in and hold no history, so they are swept
+    // on their own schedule rather than under the configurable retention policy —
+    // which an operator can disable, leaving a row per login attempt forever.
+    startDeviceAuthorizationSweeper()
     // Restore Feishu WS connections for published agents, then replay any
     // pending message events that were persisted before the last shutdown.
     // We wait for connections so replayPendingEvent can find an active client.

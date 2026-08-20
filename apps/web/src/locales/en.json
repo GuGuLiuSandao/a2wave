@@ -521,6 +521,9 @@
     "skillFolderNoMd": "No SKILL.md found in the folder; cannot create skill"
   },
   "apiError": {
+    "DEVICE_REQUEST_NOT_FOUND": "This code has expired or was already used. Start a new login in your terminal.",
+    "INVALID_USER_CODE": "That code is not valid. Check it and try again.",
+    "PUBLIC_BASE_URL_NOT_SET": "Device login needs a public address. Ask an administrator to set it in Settings.",
     "SCM_INITIAL_SYNC_REQUIRED": "This SCM source has not completed initial sync and cannot be used by an Agent",
     "INVALID_CREDENTIALS": "Invalid username or password",
     "ACCOUNT_DISABLED": "Account is disabled",
@@ -1110,7 +1113,8 @@
       "attachments": "Attachments",
       "branding": "Branding",
       "webhook": "Notification Webhook",
-      "auth": "Enterprise Login"
+      "auth": "Enterprise Login",
+      "cli": "CLI Access"
     },
     "faviconRemove": "Remove favicon",
     "faviconUpload": "Upload favicon"
@@ -2242,6 +2246,10 @@
       "agent.update": "Update Agent",
       "artifact.delete": "Delete artifact",
       "auth.change-password": "Change password",
+      "auth.device.approved": "Device login approved",
+      "auth.device.claimed": "Device login token issued",
+      "auth.device.denied": "Device login denied",
+      "auth.device.requested": "Device login requested",
       "auth.login": "Sign in",
       "auth.logout": "Sign out",
       "auth.oauth.exchange_failed": "Enterprise identity token exchange failed",
@@ -2253,6 +2261,8 @@
       "auth.setup.completed": "Complete initial administrator setup",
       "auth.share.access_denied": "Share access denied",
       "auth.share.access_granted": "Share access granted",
+      "cli_token.created": "Create CLI token",
+      "cli_token.revoked": "Revoke CLI token",
       "data_retention.sweep": "Data retention sweep",
       "evaluation_case.create": "Create evaluation case",
       "evaluation_case.delete": "Delete evaluation case",
@@ -2325,7 +2335,9 @@
     "resources": {
       "agent": "Agent",
       "artifact": "Artifact",
+      "cli_token": "CLI token",
       "data_retention": "Data retention",
+      "device_authorization": "Device login request",
       "evaluation_case": "Evaluation case",
       "evaluation_result": "Evaluation result",
       "evaluation_set": "Evaluation set",
@@ -2548,5 +2560,67 @@
         "desc": "The account for this link has already been created. Please sign in."
       }
     }
+  },
+  "device": {
+    "title": "Authorize a device",
+    "desc": "Enter the code shown in your terminal to sign that machine in to a2wave.",
+    "codeLabel": "Device code",
+    "codePlaceholder": "XXXX-XXXX",
+    "continue": "Continue",
+    "confirmTitle": "Authorize this sign-in?",
+    "confirmDesc": "A device is asking to sign in as you. Only approve it if you started this login yourself.",
+    "requestedFrom": "Requested from",
+    "client": "Client",
+    "requestedAt": "Requested at",
+    "unknownAddress": "Unknown address",
+    "unknownClient": "Unknown client",
+    "approve": "Approve",
+    "deny": "Deny",
+    "approved": "Device authorized",
+    "approvedDesc": "Return to your terminal — it will continue automatically.",
+    "denied": "Device login denied",
+    "deniedDesc": "The device was not signed in. You can close this page.",
+    "warning": "Never approve a code that someone else sent you.",
+    "invalidCode": "That code is not valid. Check it and try again.",
+    "notFound": "This code has expired or was already used. Start a new login in your terminal."
+  },
+  "cli": {
+    "title": "CLI access",
+    "desc": "Long-lived tokens for the a2wave CLI, CI jobs, and scripts. Each one can be revoked on its own.",
+    "create": "New token",
+    "createTitle": "Create a CLI token",
+    "name": "Name",
+    "namePlaceholder": "What will use this token? e.g. CI runner",
+    "nameRequired": "A name is required — it is the only way to tell tokens apart later.",
+    "expiry": "Expires",
+    "expiryNever": "Never",
+    "expiryDays": "{{count}} days",
+    "expiryHint": "A token with no expiry keeps working until you revoke it.",
+    "created": "Token created",
+    "createdWarning": "Copy it now — it will not be shown again.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "done": "Done",
+    "empty": "No CLI tokens yet.",
+    "colName": "Name",
+    "colLastUsed": "Last used",
+    "colExpires": "Expires",
+    "never": "Never used",
+    "sessionTtl": "Session token lifetime",
+    "sessionTtlValue": "{{days}} day(s)",
+    "sessionTtlHint": "Applies to browser sign-ins and login-issued tokens — <b>not</b> to the CLI tokens above, which use the expiry you pick when creating each one. Set by the AUTH_SESSION_TTL_DAYS environment variable and requires a restart; it is deliberately not editable here.",
+    "createDesc": "The token is shown once, immediately after it is created.",
+    "nameHint": "Used to identify this token later — a machine or job name works well.",
+    "colStatus": "Status",
+    "deleteTitle": "Delete this token?",
+    "deleteContent": "\"{{name}}\" will stop working immediately, and anything using it will lose access.",
+    "status": {
+      "active": "Active",
+      "revoked": "Deleted",
+      "expired": "Expired"
+    },
+    "pageDesc": "Tokens for the a2wave CLI, CI jobs, and scripts. Each one is yours alone and can be deleted on its own.",
+    "submit": "Create token",
+    "copyFailed": "Could not copy. Select the token and copy it manually."
   }
 }
